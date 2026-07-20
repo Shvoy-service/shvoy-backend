@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: shvoy
+      POSTGRES_USER: shvoy
+      POSTGRES_PASSWORD: shvoy
+    ports:
+      - "5432:5432"
+    volumes:
+      - shvoy-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  shvoy-postgres-data:

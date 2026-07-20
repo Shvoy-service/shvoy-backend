@@ -1,0 +1,7 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:shvoy;MODE=PostgreSQL
+    username: sa
+    password:
+  flyway:
+    locations: classpath:db/migration

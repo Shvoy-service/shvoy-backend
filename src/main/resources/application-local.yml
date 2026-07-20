@@ -1,0 +1,15 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/shvoy
+    username: shvoy
+    password: shvoy
+  jpa:
+    show-sql: true
+  docker:
+    compose:
+      enabled: true
+      file: docker-compose.yml
+
+logging:
+  level:
+    com.shvoy: DEBUG

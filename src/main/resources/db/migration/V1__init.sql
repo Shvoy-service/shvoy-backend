@@ -1,0 +1,3 @@
+-- Baseline migration. Establishes Flyway's schema history table.
+-- Feature modules add their own versioned migrations under this directory
+-- as they build out their schemas.
