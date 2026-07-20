@@ -4,6 +4,10 @@ spring:
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
 
+aws:
+  s3:
+    documents-bucket: shvoy-documents-dev
+
 logging:
   level:
     com.shvoy: DEBUG

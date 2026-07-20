@@ -10,6 +10,11 @@ spring:
       enabled: true
       file: docker-compose.yml
 
+aws:
+  s3:
+    documents-bucket: shvoy-documents-local
+    endpoint-override: http://localhost:4566
+
 logging:
   level:
     com.shvoy: DEBUG

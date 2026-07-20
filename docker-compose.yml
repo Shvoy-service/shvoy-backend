@@ -10,5 +10,17 @@ services:
     volumes:
       - shvoy-postgres-data:/var/lib/postgresql/data
 
+  localstack:
+    image: localstack/localstack:3
+    environment:
+      SERVICES: s3
+      DEFAULT_REGION: eu-west-2
+    ports:
+      - "4566:4566"
+    volumes:
+      - ./docker/localstack/init-s3.sh:/etc/localstack/init/ready.d/init-s3.sh:ro
+      - shvoy-localstack-data:/var/lib/localstack
+
 volumes:
   shvoy-postgres-data:
+  shvoy-localstack-data:
