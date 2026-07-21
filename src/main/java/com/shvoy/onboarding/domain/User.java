@@ -11,9 +11,11 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import com.shvoy.TenantScoped;
+
 @Entity
 @Table(name = "users")
-public class User {
+public class User extends TenantScoped {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)

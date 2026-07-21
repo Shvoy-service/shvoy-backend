@@ -1,7 +1,5 @@
 package com.shvoy;
 
-import java.util.Arrays;
-
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -10,12 +8,21 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 
-import com.shvoy.onboarding.domain.Role;
-
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
 class SecurityConfig {
+
+    /**
+     * Mirrors onboarding.domain.Role's values. Listed as literals rather than
+     * derived from the enum so this shared/root class doesn't depend back on
+     * a feature module (onboarding already depends on root code — TenantScoped,
+     * TenantGuard — so the reverse dependency would create a module cycle).
+     * Keep in sync with Role if roles ever change.
+     */
+    private static final String[] ALL_ROLE_AUTHORITIES = {
+        "ROLE_ADMIN", "ROLE_PURCHASING", "ROLE_FINANCE", "ROLE_APPROVER", "ROLE_READ_ONLY"
+    };
 
     /**
      * Method security (e.g. {@code @PreAuthorize("hasRole('ADMIN')")}) is enabled
@@ -32,10 +39,7 @@ class SecurityConfig {
         http
             .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
             .csrf(csrf -> csrf.disable())
-            .anonymous(anon -> anon.authorities(
-                Arrays.stream(Role.values())
-                    .map(role -> "ROLE_" + role.name())
-                    .toArray(String[]::new)));
+            .anonymous(anon -> anon.authorities(ALL_ROLE_AUTHORITIES));
         return http.build();
     }
 
