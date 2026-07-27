@@ -1,0 +1,10 @@
+ALTER TABLE companies ADD COLUMN name VARCHAR(255) NOT NULL;
+ALTER TABLE companies ADD COLUMN created_at TIMESTAMP WITH TIME ZONE NOT NULL;
+
+ALTER TABLE users ADD COLUMN status VARCHAR(20) NOT NULL;
+ALTER TABLE users ADD COLUMN password_hash VARCHAR(255);
+ALTER TABLE users ADD COLUMN created_at TIMESTAMP WITH TIME ZONE NOT NULL;
+ALTER TABLE users ADD COLUMN verification_token VARCHAR(255);
+ALTER TABLE users ADD COLUMN verification_token_expires_at TIMESTAMP WITH TIME ZONE;
+
+CREATE UNIQUE INDEX idx_users_verification_token ON users (verification_token);

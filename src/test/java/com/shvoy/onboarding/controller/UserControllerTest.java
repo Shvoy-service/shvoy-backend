@@ -5,6 +5,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
@@ -45,12 +47,15 @@ class UserControllerTest {
 
     @BeforeEach
     void seedTwoCompaniesWithOneUserEach() {
-        jdbcTemplate.update("INSERT INTO companies (id) VALUES (?)", companyA);
-        jdbcTemplate.update("INSERT INTO companies (id) VALUES (?)", companyB);
-        jdbcTemplate.update("INSERT INTO users (id, email, role, company_id) VALUES (?, ?, ?, ?)",
-            userAId, "a@companya.com", Role.ADMIN.name(), companyA);
-        jdbcTemplate.update("INSERT INTO users (id, email, role, company_id) VALUES (?, ?, ?, ?)",
-            userBId, "b@companyb.com", Role.ADMIN.name(), companyB);
+        Timestamp now = Timestamp.from(Instant.now());
+        jdbcTemplate.update("INSERT INTO companies (id, name, created_at) VALUES (?, ?, ?)", companyA, "Co A", now);
+        jdbcTemplate.update("INSERT INTO companies (id, name, created_at) VALUES (?, ?, ?)", companyB, "Co B", now);
+        jdbcTemplate.update(
+            "INSERT INTO users (id, email, role, status, created_at, company_id) VALUES (?, ?, ?, ?, ?, ?)",
+            userAId, "a@companya.com", Role.ADMIN.name(), "ACTIVE", now, companyA);
+        jdbcTemplate.update(
+            "INSERT INTO users (id, email, role, status, created_at, company_id) VALUES (?, ?, ?, ?, ?, ?)",
+            userBId, "b@companyb.com", Role.ADMIN.name(), "ACTIVE", now, companyB);
     }
 
     @AfterEach

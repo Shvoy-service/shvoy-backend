@@ -2,6 +2,8 @@ package com.shvoy.onboarding.repository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -47,12 +49,15 @@ class TenantIsolationTest {
         // inserting both companies' data through the tenant-filtered ORM
         // path would require switching tenants mid-session, which Hibernate
         // doesn't support (a session is bound to one tenant).
-        jdbcTemplate.update("INSERT INTO companies (id) VALUES (?)", companyA);
-        jdbcTemplate.update("INSERT INTO companies (id) VALUES (?)", companyB);
-        jdbcTemplate.update("INSERT INTO users (id, email, role, company_id) VALUES (?, ?, ?, ?)",
-            userAId, "a@companya.com", Role.ADMIN.name(), companyA);
-        jdbcTemplate.update("INSERT INTO users (id, email, role, company_id) VALUES (?, ?, ?, ?)",
-            userBId, "b@companyb.com", Role.ADMIN.name(), companyB);
+        Timestamp now = Timestamp.from(Instant.now());
+        jdbcTemplate.update("INSERT INTO companies (id, name, created_at) VALUES (?, ?, ?)", companyA, "Co A", now);
+        jdbcTemplate.update("INSERT INTO companies (id, name, created_at) VALUES (?, ?, ?)", companyB, "Co B", now);
+        jdbcTemplate.update(
+            "INSERT INTO users (id, email, role, status, created_at, company_id) VALUES (?, ?, ?, ?, ?, ?)",
+            userAId, "a@companya.com", Role.ADMIN.name(), "ACTIVE", now, companyA);
+        jdbcTemplate.update(
+            "INSERT INTO users (id, email, role, status, created_at, company_id) VALUES (?, ?, ?, ?, ?, ?)",
+            userBId, "b@companyb.com", Role.ADMIN.name(), "ACTIVE", now, companyB);
     }
 
     @AfterEach

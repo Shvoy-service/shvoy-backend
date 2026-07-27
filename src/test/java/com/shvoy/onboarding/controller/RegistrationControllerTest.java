@@ -1,0 +1,142 @@
+package com.shvoy.onboarding.controller;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import java.util.UUID;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
+
+@SpringBootTest
+@AutoConfigureMockMvc
+@ActiveProfiles("test")
+class RegistrationControllerTest {
+
+    @Autowired
+    MockMvc mockMvc;
+
+    @Autowired
+    JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    PasswordEncoder passwordEncoder;
+
+    @AfterEach
+    void cleanUp() {
+        jdbcTemplate.update("DELETE FROM users WHERE email LIKE '%@registration-test.example.com'");
+        jdbcTemplate.update("DELETE FROM companies WHERE name LIKE 'Test Co %'");
+    }
+
+    @Test
+    void registeringNewCompanyReturns201AndCreatesPendingAdmin() throws Exception {
+        String email = uniqueEmail();
+        mockMvc.perform(post("/api/onboarding/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"" + email + "\",\"companyName\":\"Test Co Alpha\"}"))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.companyId").exists())
+            .andExpect(jsonPath("$.userId").exists())
+            .andExpect(jsonPath("$.verificationRequired").value(true));
+
+        String role = jdbcTemplate.queryForObject("SELECT role FROM users WHERE email = ?", String.class, email);
+        String status = jdbcTemplate.queryForObject("SELECT status FROM users WHERE email = ?", String.class, email);
+        assertThat(role).isEqualTo("ADMIN");
+        assertThat(status).isEqualTo("PENDING");
+    }
+
+    @Test
+    void duplicateEmailReturns409() throws Exception {
+        String email = uniqueEmail();
+        String body = "{\"email\":\"" + email + "\",\"companyName\":\"Test Co Beta\"}";
+
+        mockMvc.perform(post("/api/onboarding/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+            .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/onboarding/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body.replace("Beta", "Gamma")))
+            .andExpect(status().isConflict());
+    }
+
+    @Test
+    void malformedEmailReturns400() throws Exception {
+        mockMvc.perform(post("/api/onboarding/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"not-an-email\",\"companyName\":\"Test Co Delta\"}"))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void emptyCompanyNameReturns400() throws Exception {
+        mockMvc.perform(post("/api/onboarding/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"" + uniqueEmail() + "\",\"companyName\":\"\"}"))
+            .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void activatingWithValidTokenSetsPasswordAndActivates() throws Exception {
+        String email = uniqueEmail();
+        mockMvc.perform(post("/api/onboarding/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"" + email + "\",\"companyName\":\"Test Co Epsilon\"}"))
+            .andExpect(status().isCreated());
+
+        String token = jdbcTemplate.queryForObject(
+            "SELECT verification_token FROM users WHERE email = ?", String.class, email);
+
+        mockMvc.perform(post("/api/onboarding/activate")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"token\":\"" + token + "\",\"password\":\"correct horse battery\"}"))
+            .andExpect(status().isOk());
+
+        String status = jdbcTemplate.queryForObject("SELECT status FROM users WHERE email = ?", String.class, email);
+        String passwordHash = jdbcTemplate.queryForObject(
+            "SELECT password_hash FROM users WHERE email = ?", String.class, email);
+        assertThat(status).isEqualTo("ACTIVE");
+        assertThat(passwordHash).isNotEqualTo("correct horse battery");
+        assertThat(passwordEncoder.matches("correct horse battery", passwordHash)).isTrue();
+    }
+
+    @Test
+    void activatingWithInvalidTokenReturnsNotFound() throws Exception {
+        mockMvc.perform(post("/api/onboarding/activate")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"token\":\"" + UUID.randomUUID() + "\",\"password\":\"correct horse battery\"}"))
+            .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void weakPasswordOnActivateReturns400() throws Exception {
+        String email = uniqueEmail();
+        mockMvc.perform(post("/api/onboarding/register")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"email\":\"" + email + "\",\"companyName\":\"Test Co Zeta\"}"))
+            .andExpect(status().isCreated());
+
+        String token = jdbcTemplate.queryForObject(
+            "SELECT verification_token FROM users WHERE email = ?", String.class, email);
+
+        mockMvc.perform(post("/api/onboarding/activate")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"token\":\"" + token + "\",\"password\":\"short\"}"))
+            .andExpect(status().isBadRequest());
+    }
+
+    private static String uniqueEmail() {
+        return "admin+" + UUID.randomUUID() + "@registration-test.example.com";
+    }
+}

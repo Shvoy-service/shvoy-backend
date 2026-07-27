@@ -30,7 +30,8 @@ class UserRepositoryTest {
 
     @BeforeEach
     void seedCompany() {
-        jdbcTemplate.update("INSERT INTO companies (id) VALUES (?)", companyId);
+        jdbcTemplate.update("INSERT INTO companies (id, name, created_at) VALUES (?, ?, ?)",
+            companyId, "Test Co", java.sql.Timestamp.from(java.time.Instant.now()));
     }
 
     @AfterEach

@@ -6,12 +6,28 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
 class SecurityConfig {
+
+    /**
+     * The one place in the app allowed to create a companies row. Both
+     * endpoints act before any tenant/authentication exists — see
+     * RegistrationController.
+     */
+    private static final String[] TENANT_EXEMPT_ENDPOINTS = {
+        "/api/onboarding/register", "/api/onboarding/activate"
+    };
+
+    @Bean
+    PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
 
     /**
      * Mirrors onboarding.domain.Role's values. Listed as literals rather than
@@ -46,13 +62,18 @@ class SecurityConfig {
     /**
      * dev/prod filter chain. Permissive for now because Cognito user pools aren't
      * provisioned yet; this is the isolated point where an oauth2ResourceServer().jwt()
-     * config gets wired in later without touching any business logic.
+     * config gets wired in later without touching any business logic. The
+     * register/activate endpoints are listed explicitly ahead of that catch-all
+     * so they stay permitted once it's tightened to .anyRequest().authenticated() —
+     * nothing will need to remember them at that point.
      */
     @Bean
     @Profile("!local")
     SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
         http
-            .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers(TENANT_EXEMPT_ENDPOINTS).permitAll()
+                .anyRequest().permitAll())
             .csrf(csrf -> csrf.disable());
         return http.build();
     }
