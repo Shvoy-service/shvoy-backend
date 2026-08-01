@@ -1,5 +1,6 @@
 package com.shvoy.onboarding.domain;
 
+import java.time.Instant;
 import java.util.UUID;
 
 import jakarta.persistence.Column;
@@ -11,9 +12,11 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import com.shvoy.TenantScoped;
+
 @Entity
 @Table(name = "users")
-public class User {
+public class User extends TenantScoped {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -26,12 +29,48 @@ public class User {
     @Column(nullable = false, length = 20)
     private Role role;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private UserStatus status;
+
+    @Column(name = "password_hash")
+    private String passwordHash;
+
+    @Column(name = "created_at", nullable = false)
+    private Instant createdAt;
+
+    @Column(name = "verification_token")
+    private String verificationToken;
+
+    @Column(name = "verification_token_expires_at")
+    private Instant verificationTokenExpiresAt;
+
     protected User() {
     }
 
+    /**
+     * New users start PENDING with no password — see RegistrationService for
+     * why (registration and invite acceptance both work this way: a token
+     * is issued via {@link #issueVerificationToken}, and {@link #activate}
+     * sets the password and flips status once it's verified).
+     */
     public User(String email, Role role) {
         this.email = email;
         this.role = role;
+        this.status = UserStatus.PENDING;
+        this.createdAt = Instant.now();
+    }
+
+    public void issueVerificationToken(String token, Instant expiresAt) {
+        this.verificationToken = token;
+        this.verificationTokenExpiresAt = expiresAt;
+    }
+
+    public void activate(String passwordHash) {
+        this.passwordHash = passwordHash;
+        this.status = UserStatus.ACTIVE;
+        this.verificationToken = null;
+        this.verificationTokenExpiresAt = null;
     }
 
     public UUID getId() {
@@ -44,5 +83,17 @@ public class User {
 
     public Role getRole() {
         return role;
+    }
+
+    public UserStatus getStatus() {
+        return status;
+    }
+
+    public String getPasswordHash() {
+        return passwordHash;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
     }
 }

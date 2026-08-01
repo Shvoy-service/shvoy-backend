@@ -9,6 +9,19 @@ spring:
     compose:
       enabled: true
       file: docker-compose.yml
+  flyway:
+    # Adds a local-only seed (a default company row) on top of the shared
+    # migrations, so a fresh local dev DB has something to point
+    # tenancy.local.default-company-id at. Never applied to dev/prod.
+    locations: classpath:db/migration,classpath:db/migration-local
+
+# Stand-in tenant used when a request has no X-Debug-Company-Id header (see
+# TenantContextFilter). Local development only — dev/prod have no default
+# and require the header until real Cognito-derived tenant resolution
+# replaces this mechanism.
+tenancy:
+  local:
+    default-company-id: 00000000-0000-0000-0000-000000000001
 
 aws:
   s3:
