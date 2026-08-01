@@ -7,6 +7,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.shvoy.NotFoundException;
 import com.shvoy.TenantContext;
+import com.shvoy.TenantGuard;
 import com.shvoy.onboarding.domain.Company;
 import com.shvoy.onboarding.dto.CompanyProfileResponse;
 import com.shvoy.onboarding.dto.UpdateCompanyProfileRequest;
@@ -42,17 +43,9 @@ public class CompanyProfileService {
         return toResponse(companyRepository.save(company));
     }
 
-    /**
-     * A mismatch and a genuinely missing company must look identical to the
-     * caller (see TenantGuard's javadoc for the same rule elsewhere) — both
-     * are a 404, never a 403 that would confirm another company's id is real.
-     */
     private Company resolveOwnCompany(UUID pathCompanyId) {
-        UUID callerCompanyId = TenantContext.get();
-        if (!callerCompanyId.equals(pathCompanyId)) {
-            throw new NotFoundException("Company not found");
-        }
-        return companyRepository.findById(callerCompanyId)
+        TenantGuard.assertOwnCompanyId(pathCompanyId);
+        return companyRepository.findById(TenantContext.get())
             .orElseThrow(() -> new NotFoundException("Company not found"));
     }
 

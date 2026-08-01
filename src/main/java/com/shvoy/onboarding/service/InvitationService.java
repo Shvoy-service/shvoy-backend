@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.shvoy.ConflictException;
 import com.shvoy.NotFoundException;
 import com.shvoy.TenantContext;
+import com.shvoy.TenantGuard;
 import com.shvoy.onboarding.domain.User;
 import com.shvoy.onboarding.domain.UserStatus;
 import com.shvoy.onboarding.dto.InviteRequest;
@@ -52,10 +53,8 @@ public class InvitationService {
 
     @Transactional
     public InviteResponse invite(UUID companyId, InviteRequest request) {
+        TenantGuard.assertOwnCompanyId(companyId);
         UUID callerCompanyId = TenantContext.get();
-        if (!callerCompanyId.equals(companyId)) {
-            throw new NotFoundException("Company not found");
-        }
 
         String rawToken = SecureTokens.generate();
         Instant expiresAt = Instant.now().plus(INVITE_TOKEN_TTL);

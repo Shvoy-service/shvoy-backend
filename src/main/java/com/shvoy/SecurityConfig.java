@@ -66,6 +66,13 @@ class SecurityConfig {
      * register/activate endpoints are listed explicitly ahead of that catch-all
      * so they stay permitted once it's tightened to .anyRequest().authenticated() —
      * nothing will need to remember them at that point.
+     *
+     * TODO(Story 2.6): whatever resolves the authenticated principal from the
+     * JWT here must also reject users whose users.status is INACTIVE (and
+     * PENDING, for anything other than the exempt endpoints above) — there's
+     * no per-user auth pipeline yet for that check to live in, so it isn't
+     * enforced anywhere today. Deactivation (TeamManagementService) only
+     * updates the row; it has no session to revoke.
      */
     @Bean
     @Profile("!local")
