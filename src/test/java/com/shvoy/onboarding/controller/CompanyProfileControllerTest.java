@@ -1,6 +1,7 @@
 package com.shvoy.onboarding.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -63,7 +64,16 @@ class CompanyProfileControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.id").value(companyA.toString()))
             .andExpect(jsonPath("$.name").value("Co A"))
-            .andExpect(jsonPath("$.registeredAddress").doesNotExist());
+            .andExpect(jsonPath("$.registeredAddress").value(nullValue()));
+    }
+
+    @Test
+    @WithMockUser(roles = "READ_ONLY")
+    void getIsAllowedForAnyAuthenticatedRole() throws Exception {
+        mockMvc.perform(get("/api/onboarding/company/{companyId}/profile", companyA)
+                .header(TENANT_HEADER, companyA.toString()))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.name").value("Co A"));
     }
 
     @Test

@@ -36,7 +36,7 @@ public class Company {
     @Column(name = "country", length = 100)
     private String country;
 
-    @Column(name = "contact_email")
+    @Column(name = "contact_email", length = 255)
     private String contactEmail;
 
     @Column(name = "contact_phone", length = 50)
@@ -57,12 +57,6 @@ public class Company {
         this.createdAt = Instant.now();
     }
 
-    /**
-     * Full-replace update of every editable profile field (see
-     * CompanyProfileService) — a field left null in the request clears the
-     * corresponding column rather than leaving it untouched, matching PUT
-     * semantics.
-     */
     public void updateProfile(String registeredAddress, String country, String contactEmail,
             String contactPhone, String registrationNumber) {
         this.registeredAddress = registeredAddress;
