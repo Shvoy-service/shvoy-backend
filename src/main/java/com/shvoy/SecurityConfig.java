@@ -16,12 +16,12 @@ import org.springframework.security.web.SecurityFilterChain;
 class SecurityConfig {
 
     /**
-     * The one place in the app allowed to create a companies row. Both
-     * endpoints act before any tenant/authentication exists — see
-     * RegistrationController.
+     * Endpoints reachable by a caller with no account yet, so none of them
+     * can depend on authentication or an established tenant — see
+     * RegistrationController and InviteAcceptanceController.
      */
     private static final String[] TENANT_EXEMPT_ENDPOINTS = {
-        "/api/onboarding/register", "/api/onboarding/activate"
+        "/api/onboarding/register", "/api/onboarding/activate", "/api/onboarding/invite/accept"
     };
 
     @Bean

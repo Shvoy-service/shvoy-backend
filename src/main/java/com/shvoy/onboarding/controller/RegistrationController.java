@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RestController;
 import jakarta.validation.Valid;
 
 import com.shvoy.onboarding.dto.ActivateAccountRequest;
+import com.shvoy.onboarding.dto.ActivateAccountResponse;
 import com.shvoy.onboarding.dto.RegisterCompanyRequest;
 import com.shvoy.onboarding.dto.RegisterCompanyResponse;
 import com.shvoy.onboarding.service.RegistrationService;
@@ -37,8 +38,7 @@ class RegistrationController {
     }
 
     @PostMapping("/activate")
-    ResponseEntity<Void> activate(@Valid @RequestBody ActivateAccountRequest request) {
-        registrationService.activate(request.token(), request.password());
-        return ResponseEntity.ok().build();
+    ResponseEntity<ActivateAccountResponse> activate(@Valid @RequestBody ActivateAccountRequest request) {
+        return ResponseEntity.ok(registrationService.activate(request.token(), request.password()));
     }
 }
