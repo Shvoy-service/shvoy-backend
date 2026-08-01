@@ -2,6 +2,7 @@ package com.shvoy.onboarding.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -109,7 +110,11 @@ class RegistrationControllerTest {
         mockMvc.perform(post("/api/onboarding/activate")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"token\":\"" + token + "\",\"password\":\"correct horse battery\"}"))
-            .andExpect(status().isOk());
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.id").exists())
+            .andExpect(jsonPath("$.email").value(email))
+            .andExpect(jsonPath("$.role").value("ADMIN"))
+            .andExpect(jsonPath("$.status").value("ACTIVE"));
 
         String status = jdbcTemplate.queryForObject("SELECT status FROM users WHERE email = ?", String.class, email);
         String passwordHash = jdbcTemplate.queryForObject(
@@ -124,7 +129,8 @@ class RegistrationControllerTest {
         mockMvc.perform(post("/api/onboarding/activate")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"token\":\"" + UUID.randomUUID() + "\",\"password\":\"correct horse battery\"}"))
-            .andExpect(status().isNotFound());
+            .andExpect(status().isNotFound())
+            .andExpect(content().string(""));
     }
 
     @Test

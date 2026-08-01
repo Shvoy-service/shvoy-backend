@@ -21,6 +21,8 @@ import com.shvoy.TenantContext;
 import com.shvoy.onboarding.domain.Company;
 import com.shvoy.onboarding.domain.Role;
 import com.shvoy.onboarding.domain.User;
+import com.shvoy.onboarding.domain.UserStatus;
+import com.shvoy.onboarding.dto.ActivateAccountResponse;
 import com.shvoy.onboarding.dto.RegisterCompanyResponse;
 import com.shvoy.onboarding.repository.CompanyRepository;
 import com.shvoy.onboarding.repository.UserRepository;
@@ -96,34 +98,47 @@ public class RegistrationService {
 
     /**
      * Verifies a registration/invite token, sets the password, and
-     * activates the account. The token lookup is a raw query for the same
-     * reason as above: which company this user belongs to isn't known
-     * until the token itself tells us.
+     * activates the account — shared by both RegistrationController's
+     * self-registration /activate and InviteAcceptanceController's
+     * /invite/accept, since both are exactly this same operation. The
+     * activation itself is a single conditional UPDATE, not a read via
+     * userRepository followed by a save: token consumption and activation
+     * must be atomic, and a JPA read-then-write has a gap between them
+     * where two concurrent submissions of the same token could both pass
+     * their checks and both activate the account. A single UPDATE with the
+     * PENDING/token/expiry conditions in its WHERE clause closes that gap —
+     * only one of two racing UPDATEs can affect a still-PENDING row, so the
+     * loser sees zero rows affected and is rejected exactly like an
+     * unknown, expired, or already-consumed token. No new company_id or
+     * role can enter through this path — both were already fixed when the
+     * PENDING row was created (RegistrationService.register or
+     * InvitationService.invite), and this method only ever writes the
+     * password hash and clears the token.
      */
-    public void activate(String token, String password) {
-        Map<String, Object> row;
+    public ActivateAccountResponse activate(String token, String password) {
+        String tokenHash = SecureTokens.hash(token);
+
+        UUID userId;
         try {
-            row = jdbcTemplate.queryForMap(
-                "SELECT id, company_id FROM users "
-                    + "WHERE verification_token = ? AND status = 'PENDING' AND verification_token_expires_at > ?",
-                SecureTokens.hash(token), Timestamp.from(Instant.now()));
+            userId = (UUID) jdbcTemplate.queryForMap(
+                "SELECT id FROM users WHERE verification_token = ?", tokenHash).get("id");
         } catch (EmptyResultDataAccessException e) {
-            throw new NotFoundException("Invalid or expired activation token");
+            throw new NotFoundException("Invalid or expired invite");
         }
 
-        UUID userId = (UUID) row.get("id");
-        UUID companyId = (UUID) row.get("company_id");
-
-        TenantContext.set(companyId);
-        try {
-            transactionTemplate.executeWithoutResult(status -> {
-                User user = userRepository.findById(userId)
-                    .orElseThrow(() -> new NotFoundException("Invalid or expired activation token"));
-                user.activate(passwordEncoder.encode(password));
-                userRepository.save(user);
-            });
-        } finally {
-            TenantContext.clear();
+        int updated = jdbcTemplate.update(
+            "UPDATE users SET status = 'ACTIVE', password_hash = ?, verification_token = NULL, "
+                + "verification_token_expires_at = NULL "
+                + "WHERE id = ? AND verification_token = ? AND status = 'PENDING' "
+                + "AND verification_token_expires_at > ?",
+            passwordEncoder.encode(password), userId, tokenHash, Timestamp.from(Instant.now()));
+        if (updated == 0) {
+            throw new NotFoundException("Invalid or expired invite");
         }
+
+        Map<String, Object> row = jdbcTemplate.queryForMap(
+            "SELECT id, email, role, status FROM users WHERE id = ?", userId);
+        return new ActivateAccountResponse((UUID) row.get("id"), (String) row.get("email"),
+            Role.valueOf((String) row.get("role")), UserStatus.valueOf((String) row.get("status")));
     }
 }

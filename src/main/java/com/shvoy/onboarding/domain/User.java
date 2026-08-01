@@ -51,8 +51,10 @@ public class User extends TenantScoped {
     /**
      * New users start PENDING with no password — see RegistrationService for
      * why (registration and invite acceptance both work this way: a token
-     * is issued via {@link #issueVerificationToken}, and {@link #activate}
-     * sets the password and flips status once it's verified).
+     * is issued via {@link #issueVerificationToken}, and
+     * RegistrationService.activate sets the password and flips status once
+     * it's verified — as a single conditional UPDATE, not through this
+     * entity, so token consumption and activation stay atomic).
      */
     public User(String email, Role role) {
         this.email = email;
@@ -64,13 +66,6 @@ public class User extends TenantScoped {
     public void issueVerificationToken(String token, Instant expiresAt) {
         this.verificationToken = token;
         this.verificationTokenExpiresAt = expiresAt;
-    }
-
-    public void activate(String passwordHash) {
-        this.passwordHash = passwordHash;
-        this.status = UserStatus.ACTIVE;
-        this.verificationToken = null;
-        this.verificationTokenExpiresAt = null;
     }
 
     public UUID getId() {
