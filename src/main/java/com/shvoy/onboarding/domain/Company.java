@@ -30,6 +30,24 @@ public class Company {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    @Column(name = "registered_address", length = 500)
+    private String registeredAddress;
+
+    @Column(name = "country", length = 100)
+    private String country;
+
+    @Column(name = "contact_email")
+    private String contactEmail;
+
+    @Column(name = "contact_phone", length = 50)
+    private String contactPhone;
+
+    @Column(name = "registration_number", length = 100)
+    private String registrationNumber;
+
+    @Column(name = "updated_at")
+    private Instant updatedAt;
+
     protected Company() {
     }
 
@@ -37,6 +55,22 @@ public class Company {
         this.id = id;
         this.name = name;
         this.createdAt = Instant.now();
+    }
+
+    /**
+     * Full-replace update of every editable profile field (see
+     * CompanyProfileService) — a field left null in the request clears the
+     * corresponding column rather than leaving it untouched, matching PUT
+     * semantics.
+     */
+    public void updateProfile(String registeredAddress, String country, String contactEmail,
+            String contactPhone, String registrationNumber) {
+        this.registeredAddress = registeredAddress;
+        this.country = country;
+        this.contactEmail = contactEmail;
+        this.contactPhone = contactPhone;
+        this.registrationNumber = registrationNumber;
+        this.updatedAt = Instant.now();
     }
 
     public UUID getId() {
@@ -49,5 +83,29 @@ public class Company {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public String getRegisteredAddress() {
+        return registeredAddress;
+    }
+
+    public String getCountry() {
+        return country;
+    }
+
+    public String getContactEmail() {
+        return contactEmail;
+    }
+
+    public String getContactPhone() {
+        return contactPhone;
+    }
+
+    public String getRegistrationNumber() {
+        return registrationNumber;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
     }
 }
