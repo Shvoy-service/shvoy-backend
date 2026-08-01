@@ -68,6 +68,19 @@ public class User extends TenantScoped {
         this.verificationTokenExpiresAt = expiresAt;
     }
 
+    public void changeRole(Role role) {
+        this.role = role;
+    }
+
+    /**
+     * Soft delete only — the row stays, since POs, approvals, and other
+     * records this user created must keep pointing at a real user rather
+     * than a dangling id.
+     */
+    public void deactivate() {
+        this.status = UserStatus.INACTIVE;
+    }
+
     public UUID getId() {
         return id;
     }

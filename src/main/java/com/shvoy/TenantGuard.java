@@ -1,5 +1,7 @@
 package com.shvoy;
 
+import java.util.UUID;
+
 /**
  * Defense-in-depth ownership check for a tenant-scoped record fetched by id.
  * Hibernate's tenant filtering (see TenancyConfig) already prevents a
@@ -18,7 +20,17 @@ public final class TenantGuard {
     }
 
     public static void assertOwned(TenantScoped entity) {
-        if (!TenantContext.get().equals(entity.getCompanyId())) {
+        assertOwnCompanyId(entity.getCompanyId());
+    }
+
+    /**
+     * For a path {@code companyId} where the resource itself isn't
+     * TenantScoped (e.g. Company, which IS the tenant rather than
+     * belonging to one) — compares directly against TenantContext instead
+     * of going through an entity's company_id.
+     */
+    public static void assertOwnCompanyId(UUID companyId) {
+        if (!TenantContext.get().equals(companyId)) {
             throw new NotFoundException("Not found");
         }
     }
