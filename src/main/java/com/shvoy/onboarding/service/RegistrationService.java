@@ -78,8 +78,8 @@ public class RegistrationService {
                 Company company = companyRepository.save(new Company(companyId, companyName));
 
                 User admin = new User(email, Role.ADMIN);
-                String token = UUID.randomUUID().toString();
-                admin.issueVerificationToken(token, Instant.now().plus(VERIFICATION_TOKEN_TTL));
+                String token = SecureTokens.generate();
+                admin.issueVerificationToken(SecureTokens.hash(token), Instant.now().plus(VERIFICATION_TOKEN_TTL));
                 admin = userRepository.save(admin);
 
                 // Email delivery is a separate (notifications) feature —
@@ -106,7 +106,7 @@ public class RegistrationService {
             row = jdbcTemplate.queryForMap(
                 "SELECT id, company_id FROM users "
                     + "WHERE verification_token = ? AND status = 'PENDING' AND verification_token_expires_at > ?",
-                token, Timestamp.from(Instant.now()));
+                SecureTokens.hash(token), Timestamp.from(Instant.now()));
         } catch (EmptyResultDataAccessException e) {
             throw new NotFoundException("Invalid or expired activation token");
         }

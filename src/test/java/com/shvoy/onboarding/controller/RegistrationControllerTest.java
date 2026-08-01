@@ -18,6 +18,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.shvoy.LogCapture;
+import com.shvoy.onboarding.service.RegistrationService;
+
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
@@ -90,13 +93,18 @@ class RegistrationControllerTest {
     @Test
     void activatingWithValidTokenSetsPasswordAndActivates() throws Exception {
         String email = uniqueEmail();
-        mockMvc.perform(post("/api/onboarding/register")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"email\":\"" + email + "\",\"companyName\":\"Test Co Epsilon\"}"))
-            .andExpect(status().isCreated());
+        String token;
+        try (LogCapture logs = new LogCapture(RegistrationService.class)) {
+            mockMvc.perform(post("/api/onboarding/register")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"email\":\"" + email + "\",\"companyName\":\"Test Co Epsilon\"}"))
+                .andExpect(status().isCreated());
+            token = LogCapture.valueAfter(logs.firstMessageContaining("Verification link for " + email), "token=");
+        }
 
-        String token = jdbcTemplate.queryForObject(
+        String storedToken = jdbcTemplate.queryForObject(
             "SELECT verification_token FROM users WHERE email = ?", String.class, email);
+        assertThat(storedToken).isNotEqualTo(token);
 
         mockMvc.perform(post("/api/onboarding/activate")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -122,13 +130,14 @@ class RegistrationControllerTest {
     @Test
     void weakPasswordOnActivateReturns400() throws Exception {
         String email = uniqueEmail();
-        mockMvc.perform(post("/api/onboarding/register")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"email\":\"" + email + "\",\"companyName\":\"Test Co Zeta\"}"))
-            .andExpect(status().isCreated());
-
-        String token = jdbcTemplate.queryForObject(
-            "SELECT verification_token FROM users WHERE email = ?", String.class, email);
+        String token;
+        try (LogCapture logs = new LogCapture(RegistrationService.class)) {
+            mockMvc.perform(post("/api/onboarding/register")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"email\":\"" + email + "\",\"companyName\":\"Test Co Zeta\"}"))
+                .andExpect(status().isCreated());
+            token = LogCapture.valueAfter(logs.firstMessageContaining("Verification link for " + email), "token=");
+        }
 
         mockMvc.perform(post("/api/onboarding/activate")
                 .contentType(MediaType.APPLICATION_JSON)
