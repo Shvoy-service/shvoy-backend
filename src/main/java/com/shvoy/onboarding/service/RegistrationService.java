@@ -10,12 +10,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.shvoy.ConflictException;
+import com.shvoy.IdentityProvider;
 import com.shvoy.NotFoundException;
 import com.shvoy.TenantContext;
 import com.shvoy.onboarding.domain.Company;
@@ -36,16 +36,16 @@ public class RegistrationService {
     private final CompanyRepository companyRepository;
     private final UserRepository userRepository;
     private final JdbcTemplate jdbcTemplate;
-    private final PasswordEncoder passwordEncoder;
+    private final IdentityProvider identityProvider;
     private final TransactionTemplate transactionTemplate;
 
     RegistrationService(CompanyRepository companyRepository, UserRepository userRepository,
-            JdbcTemplate jdbcTemplate, PasswordEncoder passwordEncoder,
+            JdbcTemplate jdbcTemplate, IdentityProvider identityProvider,
             PlatformTransactionManager transactionManager) {
         this.companyRepository = companyRepository;
         this.userRepository = userRepository;
         this.jdbcTemplate = jdbcTemplate;
-        this.passwordEncoder = passwordEncoder;
+        this.identityProvider = identityProvider;
         // Programmatic transactions rather than @Transactional: a
         // @Transactional method's proxy opens the EntityManager (and so
         // needs a resolvable tenant) before the method body runs — too
@@ -97,11 +97,16 @@ public class RegistrationService {
     }
 
     /**
-     * Verifies a registration/invite token, sets the password, and
-     * activates the account — shared by both RegistrationController's
-     * self-registration /activate and InviteAcceptanceController's
-     * /invite/accept, since both are exactly this same operation. The
-     * activation itself is a single conditional UPDATE, not a read via
+     * Verifies a registration/invite token, provisions the corresponding
+     * Cognito identity, and activates the account — shared by both
+     * RegistrationController's self-registration /activate and
+     * InviteAcceptanceController's /invite/accept, since both are exactly
+     * this same operation. This is also the only place a Cognito user ever
+     * gets created (not at register()/invite() time): it's the one point
+     * where email, the caller's chosen password, and company_id/role are
+     * all available together, and it's already the atomic chokepoint below.
+     *
+     * The activation itself is a single conditional UPDATE, not a read via
      * userRepository followed by a save: token consumption and activation
      * must be atomic, and a JPA read-then-write has a gap between them
      * where two concurrent submissions of the same token could both pass
@@ -113,26 +118,46 @@ public class RegistrationService {
      * role can enter through this path — both were already fixed when the
      * PENDING row was created (RegistrationService.register or
      * InvitationService.invite), and this method only ever writes the
-     * password hash and clears the token.
+     * Cognito sub and clears the token.
+     *
+     * The Cognito call happens before the UPDATE, so a Cognito failure
+     * leaves no SHVOY-side trace at all. The reverse — Cognito succeeds but
+     * the UPDATE affects zero rows, e.g. because this call lost the race
+     * above, or the token had simply expired — leaves an orphaned Cognito
+     * identity; that's compensated with a best-effort delete rather than
+     * left dangling. If the compensating delete itself fails, a stale
+     * Cognito identity for this email blocks a future attempt until it's
+     * cleaned up manually — accepted as a residual gap rather than adding
+     * retry/reconciliation machinery for what should be a rare failure.
      */
     public ActivateAccountResponse activate(String token, String password) {
         String tokenHash = SecureTokens.hash(token);
 
         UUID userId;
+        String email;
         try {
-            userId = (UUID) jdbcTemplate.queryForMap(
-                "SELECT id FROM users WHERE verification_token = ?", tokenHash).get("id");
+            Map<String, Object> tokenRow = jdbcTemplate.queryForMap(
+                "SELECT id, email FROM users WHERE verification_token = ?", tokenHash);
+            userId = (UUID) tokenRow.get("id");
+            email = (String) tokenRow.get("email");
         } catch (EmptyResultDataAccessException e) {
             throw new NotFoundException("Invalid or expired invite");
         }
 
+        String cognitoSub = identityProvider.createConfirmedUser(email, password);
+
         int updated = jdbcTemplate.update(
-            "UPDATE users SET status = 'ACTIVE', password_hash = ?, verification_token = NULL, "
+            "UPDATE users SET status = 'ACTIVE', cognito_sub = ?, verification_token = NULL, "
                 + "verification_token_expires_at = NULL "
                 + "WHERE id = ? AND verification_token = ? AND status = 'PENDING' "
                 + "AND verification_token_expires_at > ?",
-            passwordEncoder.encode(password), userId, tokenHash, Timestamp.from(Instant.now()));
+            cognitoSub, userId, tokenHash, Timestamp.from(Instant.now()));
         if (updated == 0) {
+            try {
+                identityProvider.deleteUser(email);
+            } catch (RuntimeException e) {
+                log.warn("Failed to delete orphaned Cognito user for {} after a lost activation race", email, e);
+            }
             throw new NotFoundException("Invalid or expired invite");
         }
 

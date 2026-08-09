@@ -23,11 +23,11 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.shvoy.LocalIdentityProvider;
 import com.shvoy.LogCapture;
 import com.shvoy.onboarding.service.InvitationService;
 
@@ -52,7 +52,7 @@ class InviteAcceptanceControllerTest {
     JdbcTemplate jdbcTemplate;
 
     @Autowired
-    PasswordEncoder passwordEncoder;
+    LocalIdentityProvider localIdentityProvider;
 
     final UUID companyA = UUID.randomUUID();
 
@@ -83,11 +83,11 @@ class InviteAcceptanceControllerTest {
             .andExpect(jsonPath("$.status").value("ACTIVE"));
 
         var row = jdbcTemplate.queryForMap(
-            "SELECT status, password_hash, company_id, verification_token FROM users WHERE email = ?", email);
+            "SELECT status, cognito_sub, company_id, verification_token FROM users WHERE email = ?", email);
         assertThat(row.get("status")).isEqualTo("ACTIVE");
         assertThat(row.get("company_id")).isEqualTo(companyA);
         assertThat(row.get("verification_token")).isNull();
-        assertThat(passwordEncoder.matches("correct horse battery", (String) row.get("password_hash"))).isTrue();
+        assertThat(row.get("cognito_sub")).isNotNull();
     }
 
     @Test
@@ -101,15 +101,18 @@ class InviteAcceptanceControllerTest {
                 .content(acceptBody(rawToken, "correct horse battery")))
             .andExpect(status().isOk());
 
+        String cognitoSubAfterFirstAccept = jdbcTemplate.queryForObject(
+            "SELECT cognito_sub FROM users WHERE email = ?", String.class, email);
+
         mockMvc.perform(post("/api/onboarding/invite/accept")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(acceptBody(rawToken, "another password entirely")))
             .andExpect(status().isNotFound());
 
-        String passwordHash = jdbcTemplate.queryForObject(
-            "SELECT password_hash FROM users WHERE email = ?", String.class, email);
-        assertThat(passwordEncoder.matches("correct horse battery", passwordHash)).isTrue();
-        assertThat(passwordEncoder.matches("another password entirely", passwordHash)).isFalse();
+        String cognitoSubAfterSecondAttempt = jdbcTemplate.queryForObject(
+            "SELECT cognito_sub FROM users WHERE email = ?", String.class, email);
+        assertThat(cognitoSubAfterFirstAccept).isNotBlank();
+        assertThat(cognitoSubAfterSecondAttempt).isEqualTo(cognitoSubAfterFirstAccept);
     }
 
     @Test
@@ -175,12 +178,15 @@ class InviteAcceptanceControllerTest {
         }
 
         String status = jdbcTemplate.queryForObject("SELECT status FROM users WHERE email = ?", String.class, email);
-        String passwordHash = jdbcTemplate.queryForObject(
-            "SELECT password_hash FROM users WHERE email = ?", String.class, email);
+        String cognitoSub = jdbcTemplate.queryForObject(
+            "SELECT cognito_sub FROM users WHERE email = ?", String.class, email);
         assertThat(status).isEqualTo("ACTIVE");
-        boolean matchesA = passwordEncoder.matches("password from request A", passwordHash);
-        boolean matchesB = passwordEncoder.matches("password from request B", passwordHash);
-        assertThat(matchesA ^ matchesB).as("exactly one of the two racing passwords won").isTrue();
+        assertThat(cognitoSub).isNotBlank();
+
+        long createdForEmail = localIdentityProvider.createdEmails().stream().filter(email::equals).count();
+        long deletedForEmail = localIdentityProvider.deletedEmails().stream().filter(email::equals).count();
+        assertThat(createdForEmail).as("both racing requests attempted Cognito user creation").isEqualTo(2);
+        assertThat(deletedForEmail).as("the losing request's Cognito user was compensated away").isEqualTo(1);
     }
 
     private Integer getUnchecked(Future<Integer> future) {

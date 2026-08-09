@@ -33,8 +33,8 @@ public class User extends TenantScoped {
     @Column(nullable = false, length = 20)
     private UserStatus status;
 
-    @Column(name = "password_hash")
-    private String passwordHash;
+    @Column(name = "cognito_sub", unique = true)
+    private String cognitoSub;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
@@ -49,12 +49,13 @@ public class User extends TenantScoped {
     }
 
     /**
-     * New users start PENDING with no password — see RegistrationService for
-     * why (registration and invite acceptance both work this way: a token
-     * is issued via {@link #issueVerificationToken}, and
-     * RegistrationService.activate sets the password and flips status once
-     * it's verified — as a single conditional UPDATE, not through this
-     * entity, so token consumption and activation stay atomic).
+     * New users start PENDING with no Cognito identity yet — see
+     * RegistrationService for why (registration and invite acceptance both
+     * work this way: a token is issued via {@link #issueVerificationToken},
+     * and RegistrationService.activate provisions the Cognito user and flips
+     * status once it's verified — as a single conditional UPDATE, not
+     * through this entity, so token consumption and activation stay
+     * atomic).
      */
     public User(String email, Role role) {
         this.email = email;
@@ -97,8 +98,8 @@ public class User extends TenantScoped {
         return status;
     }
 
-    public String getPasswordHash() {
-        return passwordHash;
+    public String getCognitoSub() {
+        return cognitoSub;
     }
 
     public Instant getCreatedAt() {
