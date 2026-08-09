@@ -71,9 +71,9 @@ class TeamControllerTest {
     private UUID seedUser(UUID companyId, String email, String role, String status) {
         UUID id = UUID.randomUUID();
         jdbcTemplate.update(
-            "INSERT INTO users (id, email, role, status, created_at, company_id, password_hash) "
+            "INSERT INTO users (id, email, role, status, created_at, company_id, cognito_sub) "
                 + "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            id, email, role, status, Timestamp.from(Instant.now()), companyId, "irrelevant-hash");
+            id, email, role, status, Timestamp.from(Instant.now()), companyId, UUID.randomUUID().toString());
         return id;
     }
 
@@ -98,7 +98,7 @@ class TeamControllerTest {
                 tuple("admin@co-a.example.com", "ADMIN", "ACTIVE"),
                 tuple("pending@co-a.example.com", "FINANCE", "PENDING"));
         assertThat(body).allSatisfy(member -> {
-            assertThat(member).doesNotContainKey("passwordHash");
+            assertThat(member).doesNotContainKey("cognitoSub");
             assertThat(member).doesNotContainKey("verificationToken");
             assertThat(member.keySet()).containsExactlyInAnyOrder("id", "email", "role", "status");
         });

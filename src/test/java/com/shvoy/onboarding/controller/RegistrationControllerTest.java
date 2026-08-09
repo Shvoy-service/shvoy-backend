@@ -15,7 +15,6 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -32,9 +31,6 @@ class RegistrationControllerTest {
 
     @Autowired
     JdbcTemplate jdbcTemplate;
-
-    @Autowired
-    PasswordEncoder passwordEncoder;
 
     @AfterEach
     void cleanUp() {
@@ -117,11 +113,10 @@ class RegistrationControllerTest {
             .andExpect(jsonPath("$.status").value("ACTIVE"));
 
         String status = jdbcTemplate.queryForObject("SELECT status FROM users WHERE email = ?", String.class, email);
-        String passwordHash = jdbcTemplate.queryForObject(
-            "SELECT password_hash FROM users WHERE email = ?", String.class, email);
+        String cognitoSub = jdbcTemplate.queryForObject(
+            "SELECT cognito_sub FROM users WHERE email = ?", String.class, email);
         assertThat(status).isEqualTo("ACTIVE");
-        assertThat(passwordHash).isNotEqualTo("correct horse battery");
-        assertThat(passwordEncoder.matches("correct horse battery", passwordHash)).isTrue();
+        assertThat(cognitoSub).isNotBlank();
     }
 
     @Test

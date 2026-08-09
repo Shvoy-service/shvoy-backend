@@ -8,21 +8,29 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /**
  * Populates {@link TenantContext} for the duration of each request.
  *
- * Under the local and test profiles only, the tenant is read from the
+ * Under the local and test profiles, the tenant is read from the
  * {@code X-Debug-Company-Id} header, falling back to a configured default
  * (local only, via {@code tenancy.local.default-company-id}) when absent.
- * This header is a stand-in for resolving the tenant from real Cognito JWT
- * claims, which isn't wired up yet (see SecurityConfig). Outside local/test
- * — i.e. dev and prod — the header is ignored entirely: those profiles have
- * no way to establish a tenant yet, so tenant-scoped endpoints simply fail
- * with "no tenant set" until real JWT-based resolution replaces this. That's
- * deliberate — honoring a client-supplied header with no authentication
- * behind it would be a full cross-tenant bypass anywhere it was reachable.
+ *
+ * Outside local/test — i.e. dev and prod — the header is ignored entirely
+ * (honoring a client-supplied header with no authentication behind it would
+ * be a full cross-tenant bypass), and the tenant instead comes from the
+ * authenticated request: this filter is registered (see TenancyConfig) to
+ * run after Spring Security's filter chain, so by the time it runs,
+ * SecurityContextHolder already holds the JwtAuthenticationToken that
+ * CognitoJwtAuthenticationConverter built — its {@code shvoy_company_id}
+ * claim is this request's tenant. On the tenant-exempt endpoints (register/
+ * activate/invite-accept — see SecurityConfig) there's no authenticated
+ * principal at all, so no tenant is set there either way, which is correct:
+ * those endpoints never touch tenant-scoped data.
  *
  * Requests that never touch tenant-scoped data work fine with no tenant set
  * at all; only code that calls {@link TenantContext#get()} requires it, and
@@ -45,6 +53,9 @@ class TenantContextFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         String header = honorDebugHeader ? request.getHeader(DEBUG_HEADER) : null;
         UUID companyId = header != null ? UUID.fromString(header) : localDefaultCompanyId;
+        if (companyId == null) {
+            companyId = companyIdFromAuthenticatedJwt();
+        }
         if (companyId != null) {
             TenantContext.set(companyId);
         }
@@ -53,5 +64,14 @@ class TenantContextFilter extends OncePerRequestFilter {
         } finally {
             TenantContext.clear();
         }
+    }
+
+    private static UUID companyIdFromAuthenticatedJwt() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (!(authentication instanceof JwtAuthenticationToken jwtAuth)) {
+            return null;
+        }
+        String companyId = jwtAuth.getToken().getClaimAsString(CognitoJwtAuthenticationConverter.COMPANY_ID_CLAIM);
+        return companyId != null ? UUID.fromString(companyId) : null;
     }
 }

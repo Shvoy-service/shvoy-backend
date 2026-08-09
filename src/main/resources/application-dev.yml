@@ -8,6 +8,10 @@ aws:
   s3:
     documents-bucket: shvoy-documents-dev
 
+cognito:
+  user-pool-id: ${COGNITO_USER_POOL_ID}
+  app-client-id: ${COGNITO_APP_CLIENT_ID}
+
 logging:
   level:
     com.shvoy: DEBUG

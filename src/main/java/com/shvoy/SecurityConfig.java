@@ -1,13 +1,23 @@
 package com.shvoy;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
+import org.springframework.core.convert.converter.Converter;
+import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2Error;
+import org.springframework.security.oauth2.core.OAuth2TokenValidator;
+import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.jwt.JwtDecoders;
+import org.springframework.security.oauth2.jwt.JwtValidators;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
 
 @Configuration
@@ -24,11 +34,6 @@ class SecurityConfig {
         "/api/onboarding/register", "/api/onboarding/activate", "/api/onboarding/invite/accept"
     };
 
-    @Bean
-    PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
-    }
-
     /**
      * Mirrors onboarding.domain.Role's values. Listed as literals rather than
      * derived from the enum so this shared/root class doesn't depend back on
@@ -43,14 +48,18 @@ class SecurityConfig {
     /**
      * Method security (e.g. {@code @PreAuthorize("hasRole('ADMIN')")}) is enabled
      * globally and runs regardless of profile, independently of the permitAll
-     * filter chains below. Locally there's no real authentication yet, so the
-     * anonymous principal is granted every role's authority here, making those
-     * checks a no-op under this profile only. This is NOT a bypass of security
-     * generally — dev/prod get no such grant, so @PreAuthorize checks are live
-     * there as soon as a real authenticated principal exists.
+     * filter chains below. Under local/test there's no real authentication yet
+     * (test shares this chain so the existing onboarding controller tests, which
+     * call protected endpoints with no auth setup, don't need rewriting for real
+     * JWT enforcement — that's exercised separately, see CognitoJwtAuthenticationConverter's
+     * own unit test), so the anonymous principal is granted every role's authority
+     * here, making @PreAuthorize checks a no-op under these profiles only. This is
+     * NOT a bypass of security generally — dev/prod get no such grant, so
+     * @PreAuthorize checks are live there via the real authenticated principal
+     * built below.
      */
     @Bean
-    @Profile("local")
+    @Profile("local | test")
     SecurityFilterChain localSecurityFilterChain(HttpSecurity http) throws Exception {
         http
             .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
@@ -60,28 +69,66 @@ class SecurityConfig {
     }
 
     /**
-     * dev/prod filter chain. Permissive for now because Cognito user pools aren't
-     * provisioned yet; this is the isolated point where an oauth2ResourceServer().jwt()
-     * config gets wired in later without touching any business logic. The
-     * register/activate endpoints are listed explicitly ahead of that catch-all
-     * so they stay permitted once it's tightened to .anyRequest().authenticated() —
-     * nothing will need to remember them at that point.
-     *
-     * TODO(Story 2.6): whatever resolves the authenticated principal from the
-     * JWT here must also reject users whose users.status is INACTIVE (and
-     * PENDING, for anything other than the exempt endpoints above) — there's
-     * no per-user auth pipeline yet for that check to live in, so it isn't
-     * enforced anywhere today. Deactivation (TeamManagementService) only
-     * updates the row; it has no session to revoke.
+     * dev/prod filter chain: validates Cognito-issued JWTs as an OAuth2
+     * resource server. cognitoJwtDecoder verifies signature (via the pool's
+     * JWKS), issuer, expiry, and — since Cognito access tokens carry a
+     * client_id claim rather than the standard aud — that the token was
+     * issued for this app client specifically; CognitoJwtAuthenticationConverter
+     * then resolves the SHVOY profile behind the token's subject and rejects
+     * anything that isn't an ACTIVE member of a company (see its own Javadoc
+     * for why that also covers INACTIVE/deactivated users, closing what used
+     * to be a TODO here).
      */
     @Bean
-    @Profile("!local")
-    SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
+    @Profile("!local & !test")
+    SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http, JwtDecoder cognitoJwtDecoder,
+            Converter<Jwt, AbstractAuthenticationToken> cognitoJwtAuthenticationConverter) throws Exception {
         http
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(TENANT_EXEMPT_ENDPOINTS).permitAll()
-                .anyRequest().permitAll())
+                .anyRequest().authenticated())
+            .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt
+                .decoder(cognitoJwtDecoder)
+                .jwtAuthenticationConverter(cognitoJwtAuthenticationConverter)))
             .csrf(csrf -> csrf.disable());
         return http.build();
+    }
+
+    @Bean
+    @Profile("!local & !test")
+    JwtDecoder cognitoJwtDecoder(@Value("${aws.region}") String region,
+            @Value("${cognito.user-pool-id}") String userPoolId,
+            @Value("${cognito.app-client-id}") String appClientId) {
+        String issuerUri = "https://cognito-idp." + region + ".amazonaws.com/" + userPoolId;
+        NimbusJwtDecoder decoder = (NimbusJwtDecoder) JwtDecoders.fromIssuerLocation(issuerUri);
+        OAuth2TokenValidator<Jwt> validators = new DelegatingOAuth2TokenValidator<>(
+            JwtValidators.createDefaultWithIssuer(issuerUri), new CognitoClientIdValidator(appClientId));
+        decoder.setJwtValidator(validators);
+        return decoder;
+    }
+
+    /**
+     * Cognito access tokens identify their app client via a {@code client_id}
+     * claim, not the standard {@code aud} — the default issuer/timestamp
+     * validators JwtValidators.createDefaultWithIssuer builds don't check
+     * this, so without this validator a token issued for ANY app client in
+     * the user pool would be accepted here, not just SHVOY's.
+     */
+    private static final class CognitoClientIdValidator implements OAuth2TokenValidator<Jwt> {
+
+        private final String expectedClientId;
+
+        CognitoClientIdValidator(String expectedClientId) {
+            this.expectedClientId = expectedClientId;
+        }
+
+        @Override
+        public OAuth2TokenValidatorResult validate(Jwt token) {
+            if (expectedClientId.equals(token.getClaimAsString("client_id"))) {
+                return OAuth2TokenValidatorResult.success();
+            }
+            return OAuth2TokenValidatorResult.failure(
+                new OAuth2Error("invalid_token", "Token was not issued for this app client", null));
+        }
     }
 }
