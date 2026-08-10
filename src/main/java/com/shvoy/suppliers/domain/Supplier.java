@@ -61,10 +61,34 @@ public class Supplier extends TenantScoped {
     protected Supplier() {
     }
 
-    public Supplier(String name) {
+    public Supplier(String name, String country, String contactEmail) {
         this.name = name;
+        this.country = country;
+        this.contactEmail = contactEmail;
         this.status = SupplierStatus.ACTIVE;
         this.createdAt = Instant.now();
+    }
+
+    /**
+     * Full-replace semantics (see Story 3.2) — a field omitted from the
+     * update request clears the corresponding column, same convention as
+     * Company.updateProfile.
+     */
+    public void updateDetails(String name, String country, String contactEmail) {
+        this.name = name;
+        this.country = country;
+        this.contactEmail = contactEmail;
+        this.updatedAt = Instant.now();
+    }
+
+    /**
+     * Soft delete only, same pattern as User.deactivate() (2.6) — the row
+     * stays since price files and, later, POs must keep pointing at a real
+     * supplier rather than a dangling id.
+     */
+    public void deactivate() {
+        this.status = SupplierStatus.INACTIVE;
+        this.updatedAt = Instant.now();
     }
 
     public UUID getId() {

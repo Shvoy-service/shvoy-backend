@@ -14,6 +14,7 @@ import org.springframework.http.HttpStatus;
 public enum ErrorCode {
 
     DUPLICATE_EMAIL(HttpStatus.CONFLICT),
+    DUPLICATE_SUPPLIER(HttpStatus.CONFLICT),
     LAST_ACTIVE_ADMIN(HttpStatus.CONFLICT),
     INVALID_INVITE(HttpStatus.NOT_FOUND),
     NOT_FOUND(HttpStatus.NOT_FOUND),

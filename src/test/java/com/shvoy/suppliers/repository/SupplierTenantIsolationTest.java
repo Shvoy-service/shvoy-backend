@@ -85,7 +85,7 @@ class SupplierTenantIsolationTest {
         UUID newSupplierId;
         TenantContext.set(companyA);
         try {
-            Supplier saved = supplierRepository.save(new Supplier("New Supplier"));
+            Supplier saved = supplierRepository.save(new Supplier("New Supplier", null, null));
             newSupplierId = saved.getId();
             assertThat(saved.getCompanyId()).isEqualTo(companyA);
         } finally {
