@@ -2,7 +2,6 @@ package com.shvoy.onboarding.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -137,7 +136,8 @@ class InvitationControllerTest {
                 .header(TENANT_HEADER, companyA.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(inviteBody(email, "FINANCE")))
-            .andExpect(status().isConflict());
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("DUPLICATE_EMAIL"));
     }
 
     @Test
@@ -155,7 +155,8 @@ class InvitationControllerTest {
                 .header(TENANT_HEADER, companyA.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(inviteBody(email, "FINANCE")))
-            .andExpect(status().isConflict());
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("DUPLICATE_EMAIL"));
 
         String storedToken = jdbcTemplate.queryForObject(
             "SELECT verification_token FROM users WHERE email = ?", String.class, email);
@@ -199,7 +200,7 @@ class InvitationControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(inviteBody(email, "FINANCE")))
             .andExpect(status().isNotFound())
-            .andExpect(content().string(""));
+            .andExpect(jsonPath("$.code").value("NOT_FOUND"));
 
         Integer count = jdbcTemplate.queryForObject(
             "SELECT COUNT(*) FROM users WHERE email = ?", Integer.class, email);

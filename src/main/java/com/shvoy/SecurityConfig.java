@@ -1,5 +1,6 @@
 package com.shvoy;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -19,6 +20,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoders;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.cors.CorsConfigurationSource;
 
 @Configuration
 @EnableWebSecurity
@@ -32,6 +34,17 @@ class SecurityConfig {
      */
     private static final String[] TENANT_EXEMPT_ENDPOINTS = {
         "/api/onboarding/register", "/api/onboarding/activate", "/api/onboarding/invite/accept"
+    };
+
+    /**
+     * The springdoc-generated spec and Swagger UI — permitted here so dev is
+     * actually reachable without a token; harmless in prod even though it's
+     * listed for both, since springdoc.api-docs.enabled/swagger-ui.enabled
+     * are false there (see application-prod.yml), so these paths have no
+     * registered handler in prod regardless of what's permitted here.
+     */
+    private static final String[] API_DOCS_ENDPOINTS = {
+        "/v3/api-docs", "/v3/api-docs/**", "/swagger-ui.html", "/swagger-ui/**"
     };
 
     /**
@@ -60,9 +73,12 @@ class SecurityConfig {
      */
     @Bean
     @Profile("local | test")
-    SecurityFilterChain localSecurityFilterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain localSecurityFilterChain(HttpSecurity http,
+            @Qualifier("localCorsConfigurationSource") CorsConfigurationSource corsConfigurationSource)
+            throws Exception {
         http
             .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
+            .cors(cors -> cors.configurationSource(corsConfigurationSource))
             .csrf(csrf -> csrf.disable())
             .anonymous(anon -> anon.authorities(ALL_ROLE_AUTHORITIES));
         return http.build();
@@ -82,14 +98,20 @@ class SecurityConfig {
     @Bean
     @Profile("!local & !test")
     SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http, JwtDecoder cognitoJwtDecoder,
-            Converter<Jwt, AbstractAuthenticationToken> cognitoJwtAuthenticationConverter) throws Exception {
+            Converter<Jwt, AbstractAuthenticationToken> cognitoJwtAuthenticationConverter,
+            ApiAuthenticationEntryPoint apiAuthenticationEntryPoint,
+            @Qualifier("defaultCorsConfigurationSource") CorsConfigurationSource corsConfigurationSource)
+            throws Exception {
         http
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(TENANT_EXEMPT_ENDPOINTS).permitAll()
+                .requestMatchers(API_DOCS_ENDPOINTS).permitAll()
                 .anyRequest().authenticated())
             .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt
                 .decoder(cognitoJwtDecoder)
                 .jwtAuthenticationConverter(cognitoJwtAuthenticationConverter)))
+            .exceptionHandling(handling -> handling.authenticationEntryPoint(apiAuthenticationEntryPoint))
+            .cors(cors -> cors.configurationSource(corsConfigurationSource))
             .csrf(csrf -> csrf.disable());
         return http.build();
     }

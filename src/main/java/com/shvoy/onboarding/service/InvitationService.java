@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.shvoy.ConflictException;
+import com.shvoy.ErrorCode;
 import com.shvoy.NotFoundException;
 import com.shvoy.TenantContext;
 import com.shvoy.TenantGuard;
@@ -66,7 +67,7 @@ public class InvitationService {
             UserStatus existingStatus = UserStatus.valueOf((String) existing.get("status"));
             boolean reinvitable = existingStatus == UserStatus.PENDING && existingCompanyId.equals(callerCompanyId);
             if (!reinvitable) {
-                throw new ConflictException("Email already in use: " + request.email());
+                throw new ConflictException(ErrorCode.DUPLICATE_EMAIL, "Email already in use: " + request.email());
             }
             UUID existingId = (UUID) existing.get("id");
             user = userRepository.findById(existingId)
@@ -81,7 +82,7 @@ public class InvitationService {
             } catch (DataIntegrityViolationException e) {
                 // A concurrent invite/registration for the same email won
                 // the race between our findByEmail check and this insert.
-                throw new ConflictException("Email already in use: " + request.email());
+                throw new ConflictException(ErrorCode.DUPLICATE_EMAIL, "Email already in use: " + request.email());
             }
         }
 

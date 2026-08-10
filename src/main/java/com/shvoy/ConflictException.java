@@ -1,8 +1,8 @@
 package com.shvoy;
 
-public class ConflictException extends RuntimeException {
+public class ConflictException extends ApiException {
 
-    public ConflictException(String message) {
-        super(message);
+    public ConflictException(ErrorCode code, String message) {
+        super(code, message);
     }
 }
