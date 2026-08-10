@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -81,7 +80,7 @@ class CompanyProfileControllerTest {
         mockMvc.perform(get("/api/onboarding/company/{companyId}/profile", companyB)
                 .header(TENANT_HEADER, companyA.toString()))
             .andExpect(status().isNotFound())
-            .andExpect(content().string(""));
+            .andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
 
     @Test
@@ -128,7 +127,7 @@ class CompanyProfileControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"country\":\"UK\"}"))
             .andExpect(status().isNotFound())
-            .andExpect(content().string(""));
+            .andExpect(jsonPath("$.code").value("NOT_FOUND"));
 
         String country = jdbcTemplate.queryForObject(
             "SELECT country FROM companies WHERE id = ?", String.class, companyB);

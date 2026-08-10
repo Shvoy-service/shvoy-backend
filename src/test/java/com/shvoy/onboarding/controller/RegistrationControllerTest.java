@@ -2,7 +2,6 @@ package com.shvoy.onboarding.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -68,7 +67,8 @@ class RegistrationControllerTest {
         mockMvc.perform(post("/api/onboarding/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body.replace("Beta", "Gamma")))
-            .andExpect(status().isConflict());
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("DUPLICATE_EMAIL"));
     }
 
     @Test
@@ -76,7 +76,8 @@ class RegistrationControllerTest {
         mockMvc.perform(post("/api/onboarding/register")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"email\":\"not-an-email\",\"companyName\":\"Test Co Delta\"}"))
-            .andExpect(status().isBadRequest());
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
 
     @Test
@@ -125,7 +126,7 @@ class RegistrationControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"token\":\"" + UUID.randomUUID() + "\",\"password\":\"correct horse battery\"}"))
             .andExpect(status().isNotFound())
-            .andExpect(content().string(""));
+            .andExpect(jsonPath("$.code").value("INVALID_INVITE"));
     }
 
     @Test

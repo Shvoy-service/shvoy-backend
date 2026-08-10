@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.shvoy.ConflictException;
+import com.shvoy.ErrorCode;
 import com.shvoy.NotFoundException;
 import com.shvoy.TenantGuard;
 import com.shvoy.onboarding.domain.Role;
@@ -82,7 +83,7 @@ public class TeamManagementService {
             .anyMatch(u -> !u.getId().equals(target.getId())
                 && u.getRole() == Role.ADMIN && u.getStatus() == UserStatus.ACTIVE);
         if (!anotherActiveAdminExists) {
-            throw new ConflictException("Company must have at least one active admin");
+            throw new ConflictException(ErrorCode.LAST_ACTIVE_ADMIN, "Company must have at least one active admin");
         }
     }
 

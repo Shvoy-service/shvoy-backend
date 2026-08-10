@@ -28,6 +28,15 @@ aws:
     documents-bucket: shvoy-documents-local
     endpoint-override: http://localhost:4566
 
+# Vite's default dev-server port (5173) and preview-server port (4173, used
+# by Playwright) — confirmed with the frontend. The dev server itself talks
+# to this API through a Vite proxy (same-origin from the browser's view), so
+# CORS never fires for that path; the preview server does not proxy, so it's
+# the one that actually exercises this config locally.
+shvoy:
+  cors:
+    allowed-origins: http://localhost:5173,http://localhost:4173
+
 logging:
   level:
     com.shvoy: DEBUG

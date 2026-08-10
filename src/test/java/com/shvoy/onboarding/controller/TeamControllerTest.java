@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.tuple;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -110,7 +109,7 @@ class TeamControllerTest {
         mockMvc.perform(get("/api/onboarding/company/{companyId}/users", companyB)
                 .header(TENANT_HEADER, companyA.toString()))
             .andExpect(status().isNotFound())
-            .andExpect(content().string(""));
+            .andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
 
     @Test
@@ -167,7 +166,7 @@ class TeamControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"role\":\"ADMIN\"}"))
             .andExpect(status().isNotFound())
-            .andExpect(content().string(""));
+            .andExpect(jsonPath("$.code").value("NOT_FOUND"));
 
         String role = jdbcTemplate.queryForObject("SELECT role FROM users WHERE id = ?", String.class, targetId);
         assertThat(role).isEqualTo("READ_ONLY");
@@ -182,7 +181,8 @@ class TeamControllerTest {
                 .header(TENANT_HEADER, companyA.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"role\":\"READ_ONLY\"}"))
-            .andExpect(status().isConflict());
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("LAST_ACTIVE_ADMIN"));
 
         String role = jdbcTemplate.queryForObject("SELECT role FROM users WHERE id = ?", String.class, onlyAdmin);
         assertThat(role).isEqualTo("ADMIN");
@@ -214,7 +214,8 @@ class TeamControllerTest {
                 .header(TENANT_HEADER, companyA.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"role\":\"READ_ONLY\"}"))
-            .andExpect(status().isConflict());
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("LAST_ACTIVE_ADMIN"));
     }
 
     @Test
@@ -239,7 +240,8 @@ class TeamControllerTest {
 
         mockMvc.perform(delete("/api/onboarding/company/{companyId}/users/{userId}", companyA, targetId)
                 .header(TENANT_HEADER, companyA.toString()))
-            .andExpect(status().isForbidden());
+            .andExpect(status().isForbidden())
+            .andExpect(jsonPath("$.code").value("FORBIDDEN"));
 
         String status = jdbcTemplate.queryForObject("SELECT status FROM users WHERE id = ?", String.class, targetId);
         assertThat(status).isEqualTo("ACTIVE");
@@ -252,7 +254,8 @@ class TeamControllerTest {
 
         mockMvc.perform(delete("/api/onboarding/company/{companyId}/users/{userId}", companyA, onlyAdmin)
                 .header(TENANT_HEADER, companyA.toString()))
-            .andExpect(status().isConflict());
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("LAST_ACTIVE_ADMIN"));
 
         String status = jdbcTemplate.queryForObject("SELECT status FROM users WHERE id = ?", String.class, onlyAdmin);
         assertThat(status).isEqualTo("ACTIVE");
@@ -280,7 +283,7 @@ class TeamControllerTest {
         mockMvc.perform(delete("/api/onboarding/company/{companyId}/users/{userId}", companyA, targetId)
                 .header(TENANT_HEADER, companyA.toString()))
             .andExpect(status().isNotFound())
-            .andExpect(content().string(""));
+            .andExpect(jsonPath("$.code").value("NOT_FOUND"));
 
         String status = jdbcTemplate.queryForObject("SELECT status FROM users WHERE id = ?", String.class, targetId);
         assertThat(status).isEqualTo("ACTIVE");

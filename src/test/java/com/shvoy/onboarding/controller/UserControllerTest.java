@@ -1,7 +1,6 @@
 package com.shvoy.onboarding.controller;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -77,6 +76,6 @@ class UserControllerTest {
         mockMvc.perform(get("/api/onboarding/users/{id}", userBId)
                 .header(TENANT_HEADER, companyA.toString()))
             .andExpect(status().isNotFound())
-            .andExpect(content().string(""));
+            .andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
 }

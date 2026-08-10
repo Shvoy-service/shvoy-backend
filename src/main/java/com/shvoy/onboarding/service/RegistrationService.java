@@ -15,6 +15,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.shvoy.ConflictException;
+import com.shvoy.ErrorCode;
 import com.shvoy.IdentityProvider;
 import com.shvoy.NotFoundException;
 import com.shvoy.TenantContext;
@@ -74,7 +75,7 @@ public class RegistrationService {
                 Boolean emailTaken = jdbcTemplate.queryForObject(
                     "SELECT EXISTS(SELECT 1 FROM users WHERE email = ?)", Boolean.class, email);
                 if (Boolean.TRUE.equals(emailTaken)) {
-                    throw new ConflictException("Email already registered: " + email);
+                    throw new ConflictException(ErrorCode.DUPLICATE_EMAIL, "Email already registered: " + email);
                 }
 
                 Company company = companyRepository.save(new Company(companyId, companyName));
@@ -141,7 +142,7 @@ public class RegistrationService {
             userId = (UUID) tokenRow.get("id");
             email = (String) tokenRow.get("email");
         } catch (EmptyResultDataAccessException e) {
-            throw new NotFoundException("Invalid or expired invite");
+            throw new NotFoundException(ErrorCode.INVALID_INVITE, "Invalid or expired invite");
         }
 
         String cognitoSub = identityProvider.createConfirmedUser(email, password);
@@ -158,7 +159,7 @@ public class RegistrationService {
             } catch (RuntimeException e) {
                 log.warn("Failed to delete orphaned Cognito user for {} after a lost activation race", email, e);
             }
-            throw new NotFoundException("Invalid or expired invite");
+            throw new NotFoundException(ErrorCode.INVALID_INVITE, "Invalid or expired invite");
         }
 
         Map<String, Object> row = jdbcTemplate.queryForMap(

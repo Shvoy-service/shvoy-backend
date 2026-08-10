@@ -5,3 +5,10 @@ spring:
     password:
   flyway:
     locations: classpath:db/migration
+
+# Same as application-local.yml — this profile shares its security/CORS
+# config with local (see SecurityConfig), so the property must resolve here
+# too even though no browser actually calls this profile in CI.
+shvoy:
+  cors:
+    allowed-origins: http://localhost:5173,http://localhost:4173
