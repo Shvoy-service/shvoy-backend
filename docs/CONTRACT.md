@@ -136,3 +136,4 @@ Rule already agreed: business dates are `LocalDate` (serialises as `yyyy-MM-dd`)
 - Cleanup Story 2: added API discovery (OpenAPI/Swagger UI) section.
 - Cleanup Story 3: added CORS section.
 - Cleanup Story 4: decided wire format, BigDecimal, HALF_EVEN, round-each-line-then-sum; implemented `Money`. Currency scope and the ±2% tolerance rule remain open, deferred to Feature 3.
+- Cleanup Story 5: held entirely, pending Feature 3's container-fill work — not started.
