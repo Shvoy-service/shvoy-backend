@@ -79,6 +79,7 @@ Every error response across the API — validation, not-found, conflict, forbidd
 | Code | HTTP status | Meaning |
 |---|---|---|
 | `DUPLICATE_EMAIL` | 409 | Email already registered/invited (self-registration or team invite) |
+| `DUPLICATE_SUPPLIER` | 409 | A supplier with this name (case-insensitive) already exists in the caller's company |
 | `LAST_ACTIVE_ADMIN` | 409 | Change would leave the company with zero active admins |
 | `INVALID_INVITE` | 404 | Registration/invite token is unknown, expired, or already used — kept deliberately generic; doesn't distinguish which, to avoid leaking token state to an unauthenticated caller |
 | `NOT_FOUND` | 404 | Resource doesn't exist, or exists in a different company (cross-tenant access returns the same `NOT_FOUND` as a genuine absence — see Multi-tenancy below — never a distinct code) |
@@ -91,6 +92,18 @@ This table is the contract — extend it here first when a new failure case need
 ### Multi-tenancy and `NOT_FOUND`
 
 Accessing another company's data returns the same `404`/`NOT_FOUND` as a genuinely missing resource — never a distinct code or a `403` — so a response can't be used to probe whether a resource exists in another tenant.
+
+---
+
+## Suppliers
+
+**Owner:** Story 3.2 (Supplier CRUD endpoints).
+
+- `GET /api/suppliers` defaults to **active suppliers only**, sorted by name (case-insensitive). Pass `?includeInactive=true` to see deactivated ones too.
+- No pagination yet — deliberately out of scope for the pilot's supplier counts (see Story 3.2). Revisit if/when supplier lists actually grow large enough to need it.
+- Supplier `name` is **unique per company, case-insensitively** — creating or renaming into a name that collides (ignoring case) with another active-or-inactive supplier in the same company returns `DUPLICATE_SUPPLIER`/`409`. Enforced at the application level (case-insensitive) with a case-sensitive DB unique index as a race-safety-net only (see `V10__add_supplier_name_uniqueness.sql`) — a narrow residual gap where two concurrent requests differing only in letter case could both succeed is accepted rather than reached for a Postgres-only expression index.
+- Mutations (`POST`/`PUT`/`DELETE`) are restricted to `ADMIN`/`PURCHASING`; `GET` (list and single) is open to any authenticated role.
+- Soft-delete only — `DELETE` sets `status=INACTIVE`, never removes the row, since price files and (later) POs will reference suppliers by id.
 
 ---
 
@@ -137,3 +150,5 @@ Rule already agreed: business dates are `LocalDate` (serialises as `yyyy-MM-dd`)
 - Cleanup Story 3: added CORS section.
 - Cleanup Story 4: decided wire format, BigDecimal, HALF_EVEN, round-each-line-then-sum; implemented `Money`. Currency scope and the ±2% tolerance rule remain open, deferred to Feature 3.
 - Cleanup Story 5: held entirely, pending Feature 3's container-fill work — not started.
+- Feature 3, Story 3.1: `Supplier` entity + tenant-scoped repository (no endpoints yet).
+- Feature 3, Story 3.2: added Suppliers section — CRUD endpoints, `DUPLICATE_SUPPLIER` code, default list filter/sort.
