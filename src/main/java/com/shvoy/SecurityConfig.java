@@ -48,6 +48,15 @@ class SecurityConfig {
     };
 
     /**
+     * The load balancer's health-check probe hits this with no credentials —
+     * confirmed live in A7 when the ALB marked every target unhealthy with a
+     * 401 because this chain required authentication on every request.
+     */
+    private static final String[] ACTUATOR_ENDPOINTS = {
+        "/actuator/health", "/actuator/health/**"
+    };
+
+    /**
      * Mirrors onboarding.domain.Role's values. Listed as literals rather than
      * derived from the enum so this shared/root class doesn't depend back on
      * a feature module (onboarding already depends on root code — TenantScoped,
@@ -106,6 +115,7 @@ class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(TENANT_EXEMPT_ENDPOINTS).permitAll()
                 .requestMatchers(API_DOCS_ENDPOINTS).permitAll()
+                .requestMatchers(ACTUATOR_ENDPOINTS).permitAll()
                 .anyRequest().authenticated())
             .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt
                 .decoder(cognitoJwtDecoder)

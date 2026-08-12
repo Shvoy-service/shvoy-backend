@@ -173,6 +173,24 @@
             <artifactId>testcontainers-localstack</artifactId>
             <scope>test</scope>
         </dependency>
+
+        <!--
+          Needed only to resolve AWS SSO-based profile credentials for local manual
+          verification against real AWS (e.g. S3DevBucketManualVerification) — the AWS SDK's
+          default credential chain can't resolve an `sso_session`-based profile without these
+          on the classpath. Not needed by the deployed app itself: ECS tasks authenticate via
+          their task IAM role, never SSO, so this stays test-scoped.
+        -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>sso</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>ssooidc</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>

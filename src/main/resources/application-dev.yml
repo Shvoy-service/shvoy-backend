@@ -3,10 +3,24 @@ spring:
     url: ${DB_URL}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
+  # spring-boot-docker-compose auto-detects docker-compose.yml and, if its
+  # services are already running, silently overrides the datasource above
+  # with the local container's connection details — regardless of active
+  # profile. Confirmed the hard way running this profile against real RDS
+  # on a machine with local Postgres already up: it connected to
+  # 127.0.0.1:5432 instead, and Flyway then failed validating against
+  # migration-local's locally-only V6. Docker Compose integration is a
+  # local-profile-only convenience (see application-local.yml) and must
+  # never engage here.
+  docker:
+    compose:
+      enabled: false
 
 aws:
   s3:
-    documents-bucket: shvoy-documents-dev
+    # Account-regional-namespace name (see docs/aws/A4-s3-document-bucket-checklist.md) —
+    # the plain "shvoy-documents-dev" name was already taken globally.
+    documents-bucket: shvoy-documents-dev-038774852612-eu-west-2-an
 
 cognito:
   user-pool-id: ${COGNITO_USER_POOL_ID}
