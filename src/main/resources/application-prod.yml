@@ -3,6 +3,11 @@ spring:
     url: ${DB_URL}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
+  # Same reasoning as application-dev.yml — Docker Compose auto-detection
+  # must never engage outside the local profile.
+  docker:
+    compose:
+      enabled: false
 
 aws:
   s3:
