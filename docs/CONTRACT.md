@@ -234,6 +234,42 @@ This produces a clean, contiguous, non-overlapping timeline that the price-resol
 
 ---
 
+## Price resolution — the Feature 3 → Feature 4/5 contract
+
+**Owner:** Story 3.8 (Price resolution service), the final story of Feature 3. This is the one piece Feature 4 (PO creation) and Feature 5 (PI reconciliation) actually call — everything else in Feature 3 built the data this turns into an answer. Written down explicitly here, in full, so the result shape is a documented contract those features bind to rather than a decision that only ever lived in chat (the same gap that hit the error codes and rounding rule earlier in this project).
+
+**`PriceResolutionService#resolve(supplierId, skuId, quantity, asOfDate)`** — `@NamedInterface("price-resolution")`, alongside its result type, so other modules can depend on both directly (same pattern as `onboarding.domain.Role`). Read-only, side-effect-free, and deterministic: the same four inputs always produce the same result, so Feature 5 can re-run a resolution for a past order date and reproduce the price that was actually quoted at the time. `asOfDate` is a required parameter with no "today" default — prices are historical, so a resolution without a date is meaningless.
+
+Also reachable as `GET /api/suppliers/{supplierId}/skus/{skuId}/price-resolution?quantity=N&asOfDate=yyyy-MM-dd` — a pure read, so (unlike every mutating endpoint in this module) there's no `ADMIN`/`PURCHASING` restriction, just authentication. Tenant-scoped through the supplier → SKU chain (`404` cross-tenant/nonexistent, same as everywhere else); a non-positive quantity is `VALIDATION_ERROR`.
+
+### The result shape (`PriceResolutionResult`)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `priceFound` | `boolean` | **The stable way to detect "no valid price for this date."** Never a thrown exception — a SKU genuinely having no price covering the as-of date is an expected resolution outcome, not a fault — and never a silent fallback to some other price. Feature 4 drives its "price file expired — blocks submit until overridden" behavior directly off this. |
+| `skuPriceId` | `UUID`, nullable | The resolved `SkuPrice` version — null when `priceFound` is `false`. Kept for reconciliation traceability (Feature 5). |
+| `unitPrice` | `UnitPrice`, nullable | The resolved 4dp unit price + currency — the tier price if one applied, otherwise the base `SkuPrice` price. Null when `priceFound` is `false`. |
+| `appliedTierThreshold` | `Integer`, nullable | The threshold of the tier that applied, or **null when the base price applied** (no tier, or quantity below the lowest threshold) — that null/non-null distinction is exactly what Screen 3's "discount tier applied" indicator needs. |
+| `asOfDate` | `LocalDate` | Echoes the date resolution was performed against. |
+| `cartonValid` | `boolean` | From `Sku#isCartonMultiple` — always `true` when the SKU has no carton size. Populated **regardless of `priceFound`**: carton size lives on the SKU (3.7), not the price, so it doesn't depend on price resolution succeeding. |
+| `adjustedQuantity` | `int` | From `Sku#nearestCartonMultiple` — always populated (equal to the requested quantity when already valid, or when there's no carton size). Never reimplemented here: this service calls the one shared carton rule from 3.7 rather than duplicating it, so the still-open "nearest vs. round-up" Product Owner question (see Carton/pack size above) has exactly one place to change when it's answered. |
+
+### Resolution logic
+
+1. **Price:** the `SkuPrice` whose validity window contains `asOfDate`, via the existing `SkuPrice#isInDate` (3.4) — not reimplemented. The 3.5 supersession rule keeps a SKU's prices non-overlapping, so normally at most one matches.
+2. **Tier:** from that price's tiers, the **highest threshold ≤ quantity** (tiers are monotonically non-increasing per 3.6, so the highest applicable threshold is always the correct price); no match means the base price applies.
+3. **Carton:** independent of the above — see the table.
+
+### Defensive handling: overlapping windows
+
+Two `SkuPrice` rows matching the same `asOfDate` should never happen given 3.5's guards, but resolution doesn't assume the invariant always holds. If it ever does happen, the row with the **latest `validFrom`** wins (deterministic, not arbitrary), and a `log.warn` fires — since more than one match means the non-overlapping supersession invariant was violated somewhere upstream, which is worth knowing about, not silently papering over.
+
+### Explicitly out of scope here
+
+Multi-currency conversion/comparison (the resolved price simply carries its `SkuPrice`'s currency; comparing/converting across currencies is a flagged Product Owner decision that belongs to Feature 5's reconciliation scope — see Money above). The Screen 3 "blocks submit until overridden" UI behavior and any PO logic (Feature 4 — this service only supplies the `priceFound`/carton signals that behavior reads). Any price mutation (this service never writes).
+
+---
+
 ## Dates and timestamps
 
 **Owner:** Cleanup Story 5 (date field mapping & container-fill deadline timezone). Field-level mapping is now **settled** — Story 3.4 gave the rule its first concrete case (SKU price validity dates), so this is no longer a rule with nothing to point at. Only the container-fill deadline timezone remains open, parked until Feature 8.
@@ -268,3 +304,4 @@ Rule: business dates are `LocalDate` (serialises as `yyyy-MM-dd`), real points i
 - Feature 3, Story 3.5: added SKU & price entry/upload section — manual entry + bulk CSV upload endpoints, the write-time supersession rule (auto-close vs. `AMBIGUOUS_PRICE_WINDOW`), `DUPLICATE_SKU` (now enforced), added `ValidationException` for hand-raised `VALIDATION_ERROR`s. Two MVP defaults flagged for PO confirmation: the canonical CSV template, and future-dated prices being out of scope. Also documented a latent `IllegalArgumentException`-vs-`VALIDATION_ERROR` gap in `Money`/`UnitPrice` construction from user input, closed for this story's endpoints.
 - Feature 3, Story 3.6: added Discount tiers section — `DiscountTier` entity attached to `SkuPrice` (not `Sku`, so tiers stay versioned with the price they modify), full-replace `PUT`/`GET` endpoints. Two MVP defaults flagged for PO confirmation: absolute unit price per tier (not a percentage discount), and monotonically non-increasing price as quantity rises (enforced against the base `SkuPrice` too, not just tier-to-tier). Tier columns in the 3.5 price-file upload remain unimplemented — no confirmed real format to build against yet.
 - Feature 3, Story 3.7: added Carton/pack size section — nullable `carton_size` on `Sku` (not `SkuPrice` — the opposite attachment point from discount tiers, since it's a packing property, not a price property), folded into the existing 3.5 SKU update endpoint. Added `Sku#isCartonMultiple`/`#nearestCartonMultiple` as the reusable rule for Feature 4. Flagged the literal "nearest" rounding behavior (can round below the requested quantity) for a Product Owner sanity check before Feature 4 relies on it.
+- Feature 3, Story 3.8 (final story of the feature): added the Price resolution section — `PriceResolutionService`, `@NamedInterface("price-resolution")` alongside its result type as the explicit Feature 3 → Feature 4/5 contract. Resolves price (via `SkuPrice#isInDate`), tier (highest threshold ≤ quantity), and carton validity (via `Sku`'s 3.7 rule) as of a required, non-defaulted date; `priceFound: false` is the stable no-valid-price signal, never an exception or a silent fallback. Defensive overlapping-window handling resolves to the latest `validFrom` and logs a data-integrity warning. Read-only, deterministic, no new schema. Feature 3 is now complete.
