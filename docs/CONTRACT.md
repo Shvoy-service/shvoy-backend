@@ -202,6 +202,24 @@ This produces a clean, contiguous, non-overlapping timeline that the price-resol
 
 ---
 
+## Discount tiers
+
+**Owner:** Story 3.6 (Discount tiers). *Applying* a tier to resolve the right price for a given order quantity is the price-resolution service's job (3.8) — this story only defines, validates, and stores them.
+
+- A `DiscountTier` ("at quantity ≥ threshold, the unit price is X") attaches to a **`SkuPrice`**, not the `Sku` directly. Prices are already validity-windowed (3.4/3.5); tiers need to stay versioned alongside the specific price they modify, so when a new price file supersedes an old `SkuPrice`, its tiers travel with the new version, and Feature 5's historical reconciliation still sees the tiers that actually applied at the time — not whatever the current tier structure happens to be.
+- `PUT /api/suppliers/{id}/skus/{skuId}/prices/{priceId}/tiers` — **full-replace**: the submitted list becomes the price's entire tier set (an empty list clears all tiers), same PUT-replaces-everything convention as `SupplierRequest`/`PaymentTermsRequest`. No per-tier CRUD. `GET` on the same path retrieves the current set, sorted by threshold ascending.
+- Mutation is `ADMIN`/`PURCHASING`-only; `GET` is open to any authenticated role. Tenant-scoped through the full supplier → SKU → price chain — a mismatch anywhere in that chain (wrong company, or a SKU/price that doesn't actually belong to the path's supplier/SKU) returns `404`/`NOT_FOUND`.
+- No currency field on a tier or its request — a tier's currency is always its parent `SkuPrice`'s (tiers don't change currency), composed into the wire-format `UnitPrice` at read time rather than stored redundantly where it could drift out of sync.
+
+**Two invariants enforced, both flagged as MVP defaults pending Product Owner confirmation:**
+
+1. **Absolute unit price per tier, not a percentage discount off the base.** Simpler, unambiguous, and introduces no derived-rounding step (a percentage would have to define exactly when HALF_EVEN/4dp rounding applies to the computed price). Revisit only if suppliers turn out to actually quote volume pricing as a percentage rather than a flat per-unit price.
+2. **Monotonically non-increasing price as quantity rises** — enforced across the *whole* chain, not just tier-to-tier: each tier's price must be ≤ the price for the quantity band below it, including the base `SkuPrice`'s own unit price for the lowest submitted threshold (the base price is effectively "the tier" for quantities below the first real one). A violation is a `VALIDATION_ERROR`, same as a duplicate threshold — both are treated as malformed input, not a conflict with existing state, since the whole submitted set is validated together before anything is written. This is almost always a true invariant for volume discounts (a data-entry error otherwise); revisit only if SHVOY needs to allow unusual tier structures.
+
+**Not wired up yet:** tiers arriving through the 3.5 price-file upload path. 3.5's canonical CSV template (`sku_code,description,unit_price,currency,valid_from,valid_to`) has no tier columns — it was itself an invented MVP default with no real supplier price-file format to build against. Adding tier columns to that template, and having `PriceFileParser` populate `DiscountTier`s per row, is a follow-up once the real format (and whether it carries tiers at all) is confirmed — not implied by this story.
+
+---
+
 ## Dates and timestamps
 
 **Owner:** Cleanup Story 5 (date field mapping & container-fill deadline timezone). Field-level mapping is now **settled** — Story 3.4 gave the rule its first concrete case (SKU price validity dates), so this is no longer a rule with nothing to point at. Only the container-fill deadline timezone remains open, parked until Feature 8.
@@ -234,3 +252,4 @@ Rule: business dates are `LocalDate` (serialises as `yyyy-MM-dd`), real points i
 - Feature 3, Story 3.3: added Payment terms section — `PaymentTerms` entity/endpoints, the deposit/balance split rule (HALF_EVEN, remainder on balance), added `Money.minus`.
 - Feature 3, Story 3.4: added SKU & price model section — `Sku`/`SkuPrice` entities (validity-windowed price history, not a single current price), derived in-date/expired status, added `UnitPrice` (4dp sibling to `Money`, renamed the shared serializer/deserializer from `MoneyAmountSerializer`/`Deserializer` to `AmountSerializer`/`Deserializer` accordingly). Settled the Dates and timestamps field-level mapping (Cleanup Story 5), except the still-open container-fill deadline timezone.
 - Feature 3, Story 3.5: added SKU & price entry/upload section — manual entry + bulk CSV upload endpoints, the write-time supersession rule (auto-close vs. `AMBIGUOUS_PRICE_WINDOW`), `DUPLICATE_SKU` (now enforced), added `ValidationException` for hand-raised `VALIDATION_ERROR`s. Two MVP defaults flagged for PO confirmation: the canonical CSV template, and future-dated prices being out of scope. Also documented a latent `IllegalArgumentException`-vs-`VALIDATION_ERROR` gap in `Money`/`UnitPrice` construction from user input, closed for this story's endpoints.
+- Feature 3, Story 3.6: added Discount tiers section — `DiscountTier` entity attached to `SkuPrice` (not `Sku`, so tiers stay versioned with the price they modify), full-replace `PUT`/`GET` endpoints. Two MVP defaults flagged for PO confirmation: absolute unit price per tier (not a percentage discount), and monotonically non-increasing price as quantity rises (enforced against the base `SkuPrice` too, not just tier-to-tier). Tier columns in the 3.5 price-file upload remain unimplemented — no confirmed real format to build against yet.
