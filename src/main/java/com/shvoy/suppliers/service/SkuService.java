@@ -8,6 +8,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -44,12 +45,14 @@ public class SkuService {
     private final SkuRepository skuRepository;
     private final SkuPriceRepository skuPriceRepository;
     private final SupplierRepository supplierRepository;
+    private final JdbcTemplate jdbcTemplate;
 
     SkuService(SkuRepository skuRepository, SkuPriceRepository skuPriceRepository,
-            SupplierRepository supplierRepository) {
+            SupplierRepository supplierRepository, JdbcTemplate jdbcTemplate) {
         this.skuRepository = skuRepository;
         this.skuPriceRepository = skuPriceRepository;
         this.supplierRepository = supplierRepository;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Transactional
@@ -102,8 +105,22 @@ public class SkuService {
      * a gap against the latest bounded row when there's no open row to
      * supersede) is rejected rather than guessed at — see
      * docs/CONTRACT.md's SKU & price model section.
+     *
+     * {@link #lockSkuForPriceWrite} is called first because the decision
+     * below is a plain read-then-decide over {@code existing}, with no DB
+     * constraint backing it up (unlike DUPLICATE_SKU/DUPLICATE_SUPPLIER,
+     * which both have a unique index as a race-safety-net — see V10/V14).
+     * Without serializing here, two concurrent calls for the same SKU could
+     * both read the same snapshot under READ COMMITTED, both decide
+     * they're the sole superseding write, and corrupt the timeline (e.g.
+     * both blindly overwrite the same open row's {@code validTo} to
+     * different values — there's no {@code @Version} field anywhere in
+     * this codebase, so it'd be a silent last-write-wins, not a detected
+     * conflict).
      */
     private SkuPrice insertPrice(UUID skuId, UnitPrice unitPrice, LocalDate validFrom, LocalDate validTo) {
+        lockSkuForPriceWrite(skuId);
+
         List<SkuPrice> existing = skuPriceRepository.findAll().stream()
             .filter(p -> p.getSkuId().equals(skuId))
             .toList();
@@ -139,6 +156,22 @@ public class SkuService {
         return skuPriceRepository.save(new SkuPrice(skuId, unitPrice, validFrom, validTo));
     }
 
+    /**
+     * A plain row lock on the parent Sku, held for the rest of this
+     * transaction — a second transaction's own SELECT ... FOR UPDATE for
+     * the same SKU blocks here until the first commits, so by the time it
+     * proceeds, the {@code existing} prices it reads below already reflect
+     * the first transaction's write. Locking the Sku row rather than
+     * individual SkuPrice rows is deliberate: it's the one row guaranteed
+     * to already exist before any price for it does (createSku locks the
+     * row it just inserted in the same transaction — a harmless no-op,
+     * since nothing else can see it yet), so there's always something to
+     * lock even for a SKU's very first price.
+     */
+    private void lockSkuForPriceWrite(UUID skuId) {
+        jdbcTemplate.queryForObject("SELECT id FROM skus WHERE id = ? FOR UPDATE", UUID.class, skuId);
+    }
+
     private static boolean overlaps(SkuPrice existing, LocalDate newFrom, LocalDate newTo) {
         boolean startsBeforeExistingEnds = existing.getValidTo() == null || !newFrom.isAfter(existing.getValidTo());
         boolean endsAfterExistingStarts = newTo == null || !newTo.isBefore(existing.getValidFrom());
@@ -169,9 +202,20 @@ public class SkuService {
         }
     }
 
+    /**
+     * {@code saveAndFlush}, not {@code save}: {@link #createSku} calls
+     * {@link #insertPrice} (and so {@link #lockSkuForPriceWrite}) with this
+     * SKU's id immediately afterwards, and that lock query is raw JDBC —
+     * it queries the {@code skus} table directly, bypassing Hibernate's
+     * session, so it needs this row actually written, not just pending in
+     * the persistence context. Flushing here also means the
+     * DataIntegrityViolationException below is caught at the point this
+     * method is called, not deferred to whenever the transaction next
+     * happens to flush.
+     */
     private Sku saveGuardingCodeUniqueness(Sku sku) {
         try {
-            return skuRepository.save(sku);
+            return skuRepository.saveAndFlush(sku);
         } catch (DataIntegrityViolationException e) {
             throw new ConflictException(ErrorCode.DUPLICATE_SKU, "SKU code already exists for this supplier: " + sku.getCode());
         }

@@ -10,7 +10,14 @@ import java.math.BigDecimal;
 import java.sql.Date;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -272,6 +279,61 @@ class SkuControllerTest {
                 .content("{\"unitPriceAmount\":2.0000,\"currency\":\"GBP\",\"validFrom\":\"2026-03-01\"}"))
             .andExpect(status().isNotFound())
             .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
+
+    /**
+     * Regression test for a race SkuService#insertPrice used to have: no DB
+     * constraint backs the supersession rule (unlike DUPLICATE_SKU/
+     * DUPLICATE_SUPPLIER, which both have a unique index as a safety net —
+     * see V10/V14), so without a lock, several concurrent requests reading
+     * the same "current open row" snapshot could all decide they're the
+     * sole superseding write and corrupt the timeline. Fires several
+     * identical, mutually-conflicting requests at once (same conflicting
+     * validFrom) rather than just two, since with only two threads a lock
+     * bug can pass by accident if they happen not to overlap — five makes
+     * that far less likely and gives SkuService#lockSkuForPriceWrite a real
+     * chance to prove it's serializing them.
+     */
+    @Test
+    @WithMockUser(roles = "PURCHASING")
+    void concurrentAddPriceRequestsForTheSameSkuNeverCorruptTheTimeline() throws Exception {
+        UUID skuId = createSku(supplierAId, "SKU-1", "2026-01-01", null);
+        int attempts = 5;
+
+        Callable<Integer> attempt = () -> mockMvc.perform(post("/api/suppliers/{id}/skus/{skuId}/prices",
+                    supplierAId, skuId)
+                .header(TENANT_HEADER, companyA.toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"unitPriceAmount\":2.0000,\"currency\":\"GBP\",\"validFrom\":\"2026-03-01\"}"))
+            .andReturn().getResponse().getStatus();
+
+        ExecutorService executor = Executors.newFixedThreadPool(attempts);
+        List<Integer> statuses;
+        try {
+            List<Callable<Integer>> tasks = Collections.nCopies(attempts, attempt);
+            List<Future<Integer>> futures = executor.invokeAll(tasks);
+            statuses = futures.stream().map(this::getUnchecked).toList();
+        } finally {
+            executor.shutdown();
+        }
+
+        assertThat(statuses).filteredOn(status -> status == 201).hasSize(1);
+        assertThat(statuses).filteredOn(status -> status == 409).hasSize(attempts - 1);
+
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+            "SELECT valid_from, valid_to FROM sku_prices WHERE sku_id = ? ORDER BY valid_from", skuId);
+        assertThat(rows).hasSize(2);
+        assertThat(rows.get(0).get("valid_to")).isEqualTo(Date.valueOf("2026-02-28"));
+        assertThat(rows.get(1).get("valid_from")).isEqualTo(Date.valueOf("2026-03-01"));
+        assertThat(rows.get(1).get("valid_to")).isNull();
+    }
+
+    private Integer getUnchecked(Future<Integer> future) {
+        try {
+            return future.get();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     // --- update ---
