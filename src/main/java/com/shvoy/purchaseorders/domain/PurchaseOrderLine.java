@@ -2,6 +2,7 @@ package com.shvoy.purchaseorders.domain;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
 import jakarta.persistence.Column;
@@ -14,6 +15,7 @@ import jakarta.persistence.Table;
 import com.shvoy.Money;
 import com.shvoy.TenantScoped;
 import com.shvoy.UnitPrice;
+import com.shvoy.suppliers.dto.PriceResolutionResult;
 
 /**
  * One SKU/quantity line on a {@link PurchaseOrder} — see Story 4.1.
@@ -31,12 +33,12 @@ import com.shvoy.UnitPrice;
  * a live reference to a {@code DiscountTier} row (which could later be
  * deleted out from under it by a full-replace tier update — see 3.6).
  *
- * All four price fields are nullable and there's deliberately no mutator
- * for them yet: this story defines the columns, but populating them is
- * 4.2 (resolving via 3.8) and 4.3 (computing the total) — same "field
- * exists before the story that fills it" shape as Sku's carton size (3.7)
- * existed as a column before any endpoint set it. Whichever story adds
- * that mutator also decides its exact shape; not guessed at here.
+ * {@code lineTotalAmount} stays nullable with no mutator yet — that's 4.3's
+ * job. Everything else ({@code unitPriceAmount}/{@code currency}/
+ * {@code appliedTierThreshold}, plus {@code priceFound}/
+ * {@code pricedAsOfDate}/{@code cartonValid}/{@code adjustedQuantity}) is
+ * set in one shot by {@link #applyPriceResolution}, added in Story 4.2 —
+ * see that method's Javadoc.
  */
 @Entity
 @Table(name = "purchase_order_lines")
@@ -70,6 +72,18 @@ public class PurchaseOrderLine extends TenantScoped {
     @Column(name = "line_total_amount", precision = 19, scale = 2)
     private BigDecimal lineTotalAmount;
 
+    @Column(name = "price_found")
+    private Boolean priceFound;
+
+    @Column(name = "priced_as_of_date")
+    private LocalDate pricedAsOfDate;
+
+    @Column(name = "carton_valid")
+    private Boolean cartonValid;
+
+    @Column(name = "adjusted_quantity")
+    private Integer adjustedQuantity;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -85,6 +99,30 @@ public class PurchaseOrderLine extends TenantScoped {
         this.lineNumber = lineNumber;
         this.quantity = quantity;
         this.createdAt = Instant.now();
+    }
+
+    /**
+     * Applies a 3.8 {@link PriceResolutionResult} as this line's price
+     * snapshot — see Story 4.2. This is the only place the line's price/
+     * tier/carton/validity state is written, and it always comes from a
+     * fresh resolution, never re-derived independently here — same
+     * snapshot-not-live-reference principle as the fields themselves (see
+     * class Javadoc). Carton fields are set regardless of
+     * {@code result.priceFound()} (carton validity doesn't depend on
+     * pricing succeeding — see PriceResolutionResult); the price/currency/
+     * tier fields are null when no valid price was found, so an expired or
+     * absent price file is a carried flag (see {@link #getPriceFound}),
+     * never a silent zero-price.
+     */
+    public void applyPriceResolution(PriceResolutionResult result) {
+        this.priceFound = result.priceFound();
+        this.unitPriceAmount = result.priceFound() ? result.unitPrice().amount() : null;
+        this.currency = result.priceFound() ? result.unitPrice().currency() : null;
+        this.appliedTierThreshold = result.appliedTierThreshold();
+        this.pricedAsOfDate = result.asOfDate();
+        this.cartonValid = result.cartonValid();
+        this.adjustedQuantity = result.adjustedQuantity();
+        this.updatedAt = Instant.now();
     }
 
     public UUID getId() {
@@ -126,6 +164,29 @@ public class PurchaseOrderLine extends TenantScoped {
      */
     public Money getLineTotal() {
         return lineTotalAmount == null ? null : new Money(lineTotalAmount, currency);
+    }
+
+    /**
+     * Null until {@link #applyPriceResolution} has run at least once
+     * (never priced yet); {@code false} means it ran but found no valid
+     * price for {@link #getPricedAsOfDate} (expired/absent price file —
+     * blocking on this is 4.5's job, this only carries the flag);
+     * {@code true} means {@link #getUnitPrice} is populated.
+     */
+    public Boolean getPriceFound() {
+        return priceFound;
+    }
+
+    public LocalDate getPricedAsOfDate() {
+        return pricedAsOfDate;
+    }
+
+    public Boolean getCartonValid() {
+        return cartonValid;
+    }
+
+    public Integer getAdjustedQuantity() {
+        return adjustedQuantity;
     }
 
     public Instant getCreatedAt() {
