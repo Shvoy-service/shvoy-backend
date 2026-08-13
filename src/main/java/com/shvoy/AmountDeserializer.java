@@ -8,12 +8,13 @@ import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JsonDeserializer;
 
 /**
- * Reads Money's amount from a JSON string. A non-numeric string throws
- * NumberFormatException, which Jackson wraps and Spring surfaces as
- * HttpMessageNotReadableException — already mapped to VALIDATION_ERROR by
- * ApiExceptionHandler, so no separate error handling is needed here.
+ * Reads an amount-plus-currency type's amount from a JSON string — shared
+ * by Money and UnitPrice. A non-numeric string throws NumberFormatException,
+ * which Jackson wraps and Spring surfaces as HttpMessageNotReadableException
+ * — already mapped to VALIDATION_ERROR by ApiExceptionHandler, so no
+ * separate error handling is needed here.
  */
-class MoneyAmountDeserializer extends JsonDeserializer<BigDecimal> {
+class AmountDeserializer extends JsonDeserializer<BigDecimal> {
 
     @Override
     public BigDecimal deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {

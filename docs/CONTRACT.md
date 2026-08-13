@@ -138,28 +138,42 @@ Both are isolated, low-cost-to-reverse choices confined to `PaymentTerms#split`.
 - **Internal type:** `BigDecimal` server-side, never `double`/`float`, for every monetary value.
 - **Rounding mode:** `HALF_EVEN` ("banker's rounding") — not `HALF_UP`. Ties round to whichever neighbor is even (`0.125` → `0.12`, `0.135` → `0.14`), rather than always rounding away from zero.
 - **Rounding step:** each line-level amount is rounded to 2 decimal places the moment it's computed; totals are sums of already-rounded values, never a sum of full-precision intermediates rounded once at the end. This means displayed line items always sum to the displayed total — the alternative (round-only-the-final-sum) can be a cent off from what's shown.
-- **Implementation:** `com.shvoy.Money` (record: `amount` + `currency`) is the one monetary type — every field that's money should be a `Money`, not a raw `BigDecimal`. Its compact constructor enforces scale-2/`HALF_EVEN` on construction, including on every result of `plus`/`minus`/`multiply`, so the rounding-step rule above is structural rather than a convention each call site has to remember. Wire (de)serialisation to/from the string format is built in (`MoneyAmountSerializer`/`MoneyAmountDeserializer`) — no per-field `@JsonFormat` needed anywhere `Money` is used.
+- **Implementation:** `com.shvoy.Money` (record: `amount` + `currency`) is the monetary type for currency-minor-unit amounts (totals, deposits, balances) — every such field should be a `Money`, not a raw `BigDecimal`. Its compact constructor enforces scale-2/`HALF_EVEN` on construction, including on every result of `plus`/`minus`/`multiply`, so the rounding-step rule above is structural rather than a convention each call site has to remember. Wire (de)serialisation to/from the string format is built in (`AmountSerializer`/`AmountDeserializer`, shared with `UnitPrice` below) — no per-field `@JsonFormat` needed anywhere `Money`/`UnitPrice` is used.
+- **`com.shvoy.UnitPrice` — the sibling type for per-unit prices (added Story 3.4):** same record shape, wire format, and `HALF_EVEN` rounding as `Money`, but fixed at **scale 4** instead of 2. Procurement unit prices routinely carry 4 decimal places (e.g. `1.4275`); rounding a unit price down to 2dp before multiplying by a large order quantity would compound into a real total-price error, so it's a distinct type rather than `Money` used at a different scale. `Money` stays fixed at 2dp everywhere it's used — nothing about this introduces a variable-scale `Money`.
 
-**Still open, deferred to Feature 3 (no monetary fields exist in the codebase yet, so these don't have a concrete case to resolve against):**
-- **Currency scope** — is SHVOY single-currency (e.g. USD only) for the pilot, or does multi-currency need to actually work? `Money` carries a currency code either way (validated as a real ISO 4217 code), but no conversion logic exists, and none is planned until this is answered.
-- **The ±2% tolerance boundary** — the PO/price-reconciliation matching rule that motivated this story in the first place. Needs to be spelled out concretely (which comparison, which fields) once Feature 3 exists, and a boundary test written against that actual rule — `MoneyTest` currently proves the rounding policy in isolation (see `roundsEachLineThenSumsRatherThanSummingRawAndRoundingOnce`), not that specific business rule.
+**Still open, deferred to Feature 3 (no monetary fields existed in the codebase when Cleanup Story 4 was written, so these didn't have a concrete case to resolve against — SKU unit prices, added Story 3.4, are the first, but the questions below are about `Money`/totals, not `UnitPrice`):**
+- **Currency scope** — is SHVOY single-currency (e.g. USD only) for the pilot, or does multi-currency need to actually work? `Money`/`UnitPrice` carry a currency code either way (validated as a real ISO 4217 code), but no conversion logic exists, and none is planned until this is answered.
+- **The ±2% tolerance boundary** — the PO/price-reconciliation matching rule that motivated this story in the first place. Needs to be spelled out concretely (which comparison, which fields) once Feature 3's price-resolution service (3.8) exists, and a boundary test written against that actual rule — `MoneyTest` currently proves the rounding policy in isolation (see `roundsEachLineThenSumsRatherThanSummingRawAndRoundingOnce`), not that specific business rule.
+
+---
+
+## SKU & price model
+
+**Owner:** Story 3.4 (SKU & price file model). Data model only — entry/upload endpoints are 3.5, discount tiers 3.6, carton/pack size 3.7, the price-resolution service 3.8. No endpoints exist yet from this story.
+
+- A `Sku` is a supplier's product code: `code` (required), optional `description`, `status` (active/inactive, soft-delete only, same pattern as `Supplier`). Per-supplier code uniqueness (and a `DUPLICATE_SKU` error code) is **not** enforced yet — it arrives with the entry endpoints in 3.5, same sequencing as `Supplier`'s own name-uniqueness constraint, which landed with the CRUD endpoints (3.2) rather than the entity (3.1).
+- **Price history, not a single current price:** a SKU has many `SkuPrice` records over time, each with a validity window (`validFrom` required, `validTo` nullable/open-ended), rather than one mutable current price. Deliberate — Feature 5's PO/price-file reconciliation needs to resolve "the price valid on the order's date", which a single-current-price model loses the moment a new price file supersedes an old one. Costs more now (multiple rows per SKU) but avoids a retrofit once Feature 5 depends on historical lookup. Resolving which price applies on a given date (including handling overlapping/superseding windows) is the price-resolution service's job (3.8), not this model.
+- **In-date/expired status is derived, never stored:** `SkuPrice#isInDate(LocalDate asOf)` computes it from `validFrom`/`validTo` against a caller-supplied reference date — there's no stored flag that could drift out of sync with the dates.
+- Unit price is `UnitPrice` (see Money above) — `NUMERIC(19,4)` + a currency column at the database level (`sku_prices.unit_price_amount`/`currency`), plain columns rather than a JPA-embedded `UnitPrice`, matching this codebase's existing no-embeddables/no-relationships style (see `Supplier`, `PaymentTerms`).
+- Validity dates (`valid_from`/`valid_to`) are `LocalDate`/`DATE` — see Dates and timestamps below.
+- `Sku` and `SkuPrice` both implement `TenantScoped`; a test proves Company A can't see Company B's SKUs or prices (`SkuTenantIsolationTest`, `SkuPriceTenantIsolationTest`).
 
 ---
 
 ## Dates and timestamps
 
-**Owner:** Cleanup Story 5 (date field mapping & container-fill deadline timezone). **Deliberately on hold** — container-fill doesn't exist yet (Feature 3), so the one substantive call this story exists to make (the deadline's timezone) has no concrete logic to resolve it against. Pick this back up once Feature 3's container-fill work starts.
+**Owner:** Cleanup Story 5 (date field mapping & container-fill deadline timezone). Field-level mapping is now **settled** — Story 3.4 gave the rule its first concrete case (SKU price validity dates), so this is no longer a rule with nothing to point at. Only the container-fill deadline timezone remains open, parked until Feature 8.
 
-Rule already agreed: business dates are `LocalDate` (serialises as `yyyy-MM-dd`), real points in time are `Instant` (serialises as ISO-8601 UTC).
+Rule: business dates are `LocalDate` (serialises as `yyyy-MM-dd`), real points in time are `Instant` (serialises as ISO-8601 UTC).
 
-| Field | Type |
-|---|---|
-| Requested ETD | `LocalDate` |
-| Confirmed ETD | `LocalDate` |
-| Price-file validity date | `LocalDate` |
-| Payment anchor date | `LocalDate` |
-| All `created_at`/`updated_at` timestamps | `Instant` (UTC) |
-| Container-fill decision deadline | `Instant` (UTC) — **timezone for display/evaluation not yet decided**, see below |
+| Field | Type | Status |
+|---|---|---|
+| SKU price validity dates (`valid_from`/`valid_to`) | `LocalDate` | Implemented — Story 3.4, `SkuPrice` |
+| Requested ETD | `LocalDate` | Not yet implemented (Feature 4) |
+| Confirmed ETD | `LocalDate` | Not yet implemented (Feature 4) |
+| Payment anchor date (the real date an order's BL/invoice/arrival occurred, as opposed to `PaymentTerms.anchorEvent`, which only names *which kind* of event) | `LocalDate` | Not yet implemented — lands against a real order, Feature 7 |
+| All `created_at`/`updated_at` timestamps | `Instant` (UTC) | Implemented throughout |
+| Container-fill decision deadline | `Instant` (UTC) — **timezone for display/evaluation not yet decided**, see below | Not yet implemented (Feature 8) |
 
 **Open decision:** the container-fill decision deadline is a genuine point-in-time, but which timezone it's *presented and evaluated* in (supplier's, company's, or UTC) isn't decided yet — the "confirmed by deadline" branch depends on this. **TBD**, to be resolved and recorded here before container-fill logic depends on it.
 
@@ -176,3 +190,4 @@ Rule already agreed: business dates are `LocalDate` (serialises as `yyyy-MM-dd`)
 - Feature 3, Story 3.1: `Supplier` entity + tenant-scoped repository (no endpoints yet).
 - Feature 3, Story 3.2: added Suppliers section — CRUD endpoints, `DUPLICATE_SUPPLIER` code, default list filter/sort.
 - Feature 3, Story 3.3: added Payment terms section — `PaymentTerms` entity/endpoints, the deposit/balance split rule (HALF_EVEN, remainder on balance), added `Money.minus`.
+- Feature 3, Story 3.4: added SKU & price model section — `Sku`/`SkuPrice` entities (validity-windowed price history, not a single current price), derived in-date/expired status, added `UnitPrice` (4dp sibling to `Money`, renamed the shared serializer/deserializer from `MoneyAmountSerializer`/`Deserializer` to `AmountSerializer`/`Deserializer` accordingly). Settled the Dates and timestamps field-level mapping (Cleanup Story 5), except the still-open container-fill deadline timezone.
