@@ -9,12 +9,18 @@ import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 
 /**
- * SHVOY's one monetary value type — see docs/CONTRACT.md's Money section for
+ * SHVOY's monetary value type for amounts at currency-minor-unit precision
+ * — totals, deposits, balances — see docs/CONTRACT.md's Money section for
  * the wire format, internal-type, and rounding decisions this encodes. Any
- * monetary field anywhere in the API should be a {@code Money}, not a bare
+ * such field anywhere in the API should be a {@code Money}, not a bare
  * {@code BigDecimal}/{@code double} and never a raw JSON number on the wire
  * — this class is the single place those decisions are enforced, not a
  * convention callers have to remember on every field.
+ *
+ * Not for per-unit prices, which need more precision than 2dp to avoid
+ * compounding rounding error when multiplied by large quantities — see
+ * {@link UnitPrice}, the sibling type for that case, which shares this
+ * class's wire format and rounding mode at a different scale.
  *
  * Rounding is HALF_EVEN at scale 2, applied by the compact constructor —
  * including to every arithmetic result, since {@link #plus} and
@@ -35,8 +41,8 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize;
  * coercion turns out to be the wrong default.
  */
 public record Money(
-        @JsonSerialize(using = MoneyAmountSerializer.class)
-        @JsonDeserialize(using = MoneyAmountDeserializer.class)
+        @JsonSerialize(using = AmountSerializer.class)
+        @JsonDeserialize(using = AmountDeserializer.class)
         BigDecimal amount,
         String currency) {
 
