@@ -80,10 +80,12 @@ Every error response across the API — validation, not-found, conflict, forbidd
 |---|---|---|
 | `DUPLICATE_EMAIL` | 409 | Email already registered/invited (self-registration or team invite) |
 | `DUPLICATE_SUPPLIER` | 409 | A supplier with this name (case-insensitive) already exists in the caller's company |
+| `DUPLICATE_SKU` | 409 | A SKU with this code (case-insensitive) already exists for this supplier |
+| `AMBIGUOUS_PRICE_WINDOW` | 409 | A new SkuPrice's validity window can't be reconciled with a SKU's existing prices without guessing (backdated/duplicate start, an overlap, or a gap) — see SKU & price entry/upload below |
 | `LAST_ACTIVE_ADMIN` | 409 | Change would leave the company with zero active admins |
 | `INVALID_INVITE` | 404 | Registration/invite token is unknown, expired, or already used — kept deliberately generic; doesn't distinguish which, to avoid leaking token state to an unauthenticated caller |
 | `NOT_FOUND` | 404 | Resource doesn't exist, or exists in a different company (cross-tenant access returns the same `NOT_FOUND` as a genuine absence — see Multi-tenancy below — never a distinct code) |
-| `VALIDATION_ERROR` | 400 | Request body failed `@Valid` constraints, or wasn't parseable JSON |
+| `VALIDATION_ERROR` | 400 | Request body failed `@Valid` constraints, wasn't parseable JSON, or failed a hand-checked rule raised via `ValidationException` (cross-field checks Bean Validation can't express, or a price file's row-level errors collapsed into one message — see SKU & price entry/upload below) |
 | `FORBIDDEN` | 403 | Authenticated, but the caller's role doesn't permit this action |
 | `UNAUTHENTICATED` | 401 | No valid Cognito token, or the token's identity has no active SHVOY profile |
 
@@ -149,14 +151,54 @@ Both are isolated, low-cost-to-reverse choices confined to `PaymentTerms#split`.
 
 ## SKU & price model
 
-**Owner:** Story 3.4 (SKU & price file model). Data model only — entry/upload endpoints are 3.5, discount tiers 3.6, carton/pack size 3.7, the price-resolution service 3.8. No endpoints exist yet from this story.
+**Owner:** Story 3.4 (SKU & price file model). Data model. Entry/upload endpoints are 3.5 (see below), discount tiers 3.6, carton/pack size 3.7, the price-resolution service 3.8.
 
-- A `Sku` is a supplier's product code: `code` (required), optional `description`, `status` (active/inactive, soft-delete only, same pattern as `Supplier`). Per-supplier code uniqueness (and a `DUPLICATE_SKU` error code) is **not** enforced yet — it arrives with the entry endpoints in 3.5, same sequencing as `Supplier`'s own name-uniqueness constraint, which landed with the CRUD endpoints (3.2) rather than the entity (3.1).
+- A `Sku` is a supplier's product code: `code` (required), optional `description`, `status` (active/inactive, soft-delete only, same pattern as `Supplier`). Per-supplier code uniqueness (`DUPLICATE_SKU`, case-insensitive) is enforced as of Story 3.5, same sequencing as `Supplier`'s own name-uniqueness constraint (landed with its CRUD endpoints, 3.2, rather than its entity, 3.1).
 - **Price history, not a single current price:** a SKU has many `SkuPrice` records over time, each with a validity window (`validFrom` required, `validTo` nullable/open-ended), rather than one mutable current price. Deliberate — Feature 5's PO/price-file reconciliation needs to resolve "the price valid on the order's date", which a single-current-price model loses the moment a new price file supersedes an old one. Costs more now (multiple rows per SKU) but avoids a retrofit once Feature 5 depends on historical lookup. Resolving which price applies on a given date (including handling overlapping/superseding windows) is the price-resolution service's job (3.8), not this model.
 - **In-date/expired status is derived, never stored:** `SkuPrice#isInDate(LocalDate asOf)` computes it from `validFrom`/`validTo` against a caller-supplied reference date — there's no stored flag that could drift out of sync with the dates.
 - Unit price is `UnitPrice` (see Money above) — `NUMERIC(19,4)` + a currency column at the database level (`sku_prices.unit_price_amount`/`currency`), plain columns rather than a JPA-embedded `UnitPrice`, matching this codebase's existing no-embeddables/no-relationships style (see `Supplier`, `PaymentTerms`).
 - Validity dates (`valid_from`/`valid_to`) are `LocalDate`/`DATE` — see Dates and timestamps below.
 - `Sku` and `SkuPrice` both implement `TenantScoped`; a test proves Company A can't see Company B's SKUs or prices (`SkuTenantIsolationTest`, `SkuPriceTenantIsolationTest`).
+
+---
+
+## SKU & price entry / upload
+
+**Owner:** Story 3.5 (price file entry & upload). Manual entry and bulk upload both write through the same `SkuService` methods, so the supersession rule below applies identically either way — a price file upload is not a distinct code path from adding prices by hand, just many rows of it.
+
+- `POST /api/suppliers/{id}/skus` — creates a SKU with its first `SkuPrice` in one call (a SKU without any price isn't a meaningful state). `201`, body: `{"sku": SkuResponse, "currentPrice": SkuPriceResponse}`.
+- `POST /api/suppliers/{id}/skus/{skuId}/prices` — adds a new `SkuPrice` version to an existing SKU. `201`, body: `SkuPriceResponse`.
+- `PUT /api/suppliers/{id}/skus/{skuId}` — updates SKU-level metadata only (`code`, `description`, `status`) — **never** the price; price changes are always new versions via the endpoint above, never edits reachable from this one.
+- `POST /api/suppliers/{id}/price-file` — bulk upload, `multipart/form-data` with a `file` part. `201`, body: `{"rowsProcessed": n, "s3Key": "..."}`.
+- All four: tenant-scoped (cross-tenant/nonexistent supplier or SKU → `404`), mutation restricted to `ADMIN`/`PURCHASING`. No `GET`/list endpoints exist yet for SKUs or prices — out of scope for this story (not requested by its acceptance criteria); the create/update responses are the only way to read one back for now.
+
+### The supersession rule
+
+Adding a `SkuPrice` (manually or via a file row) never mutates an existing price's value — it's always a new row. How its validity window relates to the SKU's existing prices:
+
+- If the SKU has an **open** row (`validTo IS NULL`) and the new price's `validFrom` is **after** that row's `validFrom`: **auto-close** the open row — set its `validTo` to the day before the new row's `validFrom` — then insert the new row. This is the ordinary "a later price supersedes the current one" case.
+- Anything ambiguous is **rejected** with `AMBIGUOUS_PRICE_WINDOW`/`409` rather than guessed at:
+  - the new `validFrom` isn't after the open row's `validFrom` (backdated or duplicate-start), or
+  - the new window overlaps another existing row, or
+  - there's no open row (every existing price is already bounded) and the new `validFrom` isn't **exactly** the day after the latest existing row's `validTo` (a gap, or an overlap).
+- A SKU's very first price has nothing to reconcile against and is always accepted.
+
+This produces a clean, contiguous, non-overlapping timeline that the price-resolution service (3.8) can read deterministically, without it having to arbitrate ambiguity itself.
+
+### Bulk upload
+
+- The raw file is stored in **S3** (`aws.s3.documents-bucket`, key `price-files/{companyId}/{supplierId}/{uuid}-{filename}`) **unconditionally, before any parsing or validation** — it's the audit trail for a rejected upload, same as an accepted one. A `PriceFileUpload` row (supplier, S3 key, row count) is recorded only for a **successful** upload — a failed attempt's audit trail is the S3 object itself plus the error response; a DB row for it wasn't judged worth the extra transactional complexity of surviving the same rollback that discards its rows (see the story's own scoping note).
+- **All-or-nothing:** every row's fields are validated *before* any row is applied; if any row fails, the whole file is rejected (`VALIDATION_ERROR`) with every failing row's issue(s) joined into one message, `"Row <n>: <issue>; Row <n>: <issue>..."` (1-indexed by data row, not counting the header) — same convention `ApiExceptionHandler` already uses for multiple `@Valid` field errors. Rows are then applied inside one transaction; if a later row hits `AMBIGUOUS_PRICE_WINDOW` during apply (a conflict the pre-apply field validation can't see, since it depends on rows already applied earlier in the same file), the whole transaction rolls back — that failure surfaces as a plain `AMBIGUOUS_PRICE_WINDOW` response, not decorated with a row number.
+- A row's SKU code decides create-vs-add-version: an unrecognised code (for that supplier) creates a new SKU; an existing one adds a price version to it.
+
+**Two items settled as recommended MVP defaults, flagged for Product Owner confirmation:**
+
+1. **Canonical CSV template** — no real-world SHVOY supplier price-file format was available to build against, so this story defines one: a fixed six-column header, exactly `sku_code,description,unit_price,currency,valid_from,valid_to` (any other header is rejected outright, `VALIDATION_ERROR`). `description` and `valid_to` may be blank; `unit_price` up to 4dp; `valid_from`/`valid_to` as `yyyy-MM-dd`. If suppliers' real files turn out to need arbitrary/varied formats, that's a column-mapping story ahead of `PriceFileParser`, not a change to it — parsing itself is `org.apache.commons:commons-csv`, added this story as the first CSV dependency in the project.
+2. **Future-dated prices are out of scope.** The supersession rule above assumes a new price supersedes the current one *now*. A price file effective from a future date while the current price keeps running (scheduling a future window rather than superseding immediately) is a different rule shape this story doesn't implement — confirm with Product Owners whether it's a real SHVOY scenario before building it.
+
+### A latent gap this story closed
+
+`UnitPrice`'s (and `Money`'s) compact constructor throws a raw `IllegalArgumentException` for an invalid currency code — nothing maps that to `VALIDATION_ERROR` automatically, so any endpoint that builds one from untrusted input must catch it explicitly (see `SkuService`'s currency handling) or risk an uncaught `500`. No earlier story's endpoints ever accepted a currency from a real request (3.3 has no `Money` field; 3.4 had no endpoints), so this was unreachable until now — worth remembering for any future endpoint that accepts a currency code directly.
 
 ---
 
@@ -191,3 +233,4 @@ Rule: business dates are `LocalDate` (serialises as `yyyy-MM-dd`), real points i
 - Feature 3, Story 3.2: added Suppliers section — CRUD endpoints, `DUPLICATE_SUPPLIER` code, default list filter/sort.
 - Feature 3, Story 3.3: added Payment terms section — `PaymentTerms` entity/endpoints, the deposit/balance split rule (HALF_EVEN, remainder on balance), added `Money.minus`.
 - Feature 3, Story 3.4: added SKU & price model section — `Sku`/`SkuPrice` entities (validity-windowed price history, not a single current price), derived in-date/expired status, added `UnitPrice` (4dp sibling to `Money`, renamed the shared serializer/deserializer from `MoneyAmountSerializer`/`Deserializer` to `AmountSerializer`/`Deserializer` accordingly). Settled the Dates and timestamps field-level mapping (Cleanup Story 5), except the still-open container-fill deadline timezone.
+- Feature 3, Story 3.5: added SKU & price entry/upload section — manual entry + bulk CSV upload endpoints, the write-time supersession rule (auto-close vs. `AMBIGUOUS_PRICE_WINDOW`), `DUPLICATE_SKU` (now enforced), added `ValidationException` for hand-raised `VALIDATION_ERROR`s. Two MVP defaults flagged for PO confirmation: the canonical CSV template, and future-dated prices being out of scope. Also documented a latent `IllegalArgumentException`-vs-`VALIDATION_ERROR` gap in `Money`/`UnitPrice` construction from user input, closed for this story's endpoints.

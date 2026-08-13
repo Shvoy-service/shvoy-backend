@@ -22,7 +22,7 @@ import com.shvoy.TenantScoped;
  * shape as {@link Supplier}.
  *
  * Entry/upload endpoints, and per-supplier code uniqueness enforcement
- * (the {@code DUPLICATE_SKU} error code), arrive with Story 3.5 — same
+ * (the {@code DUPLICATE_SKU} error code), arrived with Story 3.5 — same
  * sequencing as Supplier's own name-uniqueness constraint, which landed
  * with the CRUD endpoints (3.2) rather than the entity (3.1).
  */
@@ -62,6 +62,18 @@ public class Sku extends TenantScoped {
         this.description = description;
         this.status = SkuStatus.ACTIVE;
         this.createdAt = Instant.now();
+    }
+
+    /**
+     * SKU-level metadata only (Story 3.5) — code, description, status.
+     * Never the price: price changes are new {@link SkuPrice} versions, not
+     * edits reachable from here.
+     */
+    public void update(String code, String description, SkuStatus status) {
+        this.code = code;
+        this.description = description;
+        this.status = status;
+        this.updatedAt = Instant.now();
     }
 
     public UUID getId() {
