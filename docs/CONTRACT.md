@@ -107,6 +107,29 @@ Accessing another company's data returns the same `404`/`NOT_FOUND` as a genuine
 
 ---
 
+## Payment terms
+
+**Owner:** Story 3.3 (Payment terms). This story stores terms and defines the split rule; it does not calculate actual due dates against a real order — that's Feature 7.
+
+- A supplier has at most one payment-terms record: `PUT /api/suppliers/{id}/payment-terms` sets or updates it (full-representation, same PUT-replaces-everything semantics as `SupplierRequest`); `GET /api/suppliers/{id}/payment-terms` retrieves it. A dedicated sub-resource, not folded into `SupplierResponse` — same reasoning as splitting `TeamController` from `CompanyProfileController`.
+- `GET` before terms have ever been set returns `404`/`NOT_FOUND`, same as any other not-yet-existing sub-resource.
+- **Fields:** `depositPercentage` (`BigDecimal`, 0–100 inclusive, fractional values allowed e.g. `33.5`) is the only percentage stored. `balancePercentage` in the response is always `100 − depositPercentage`, computed on read — never an independent stored/validated field, so the two can't drift out of sync. `anchorEvent` is one of `BL`/`INVOICE`/`ARRIVAL`; `daysOffset` is a non-negative integer.
+- **Model:** a separate `payment_terms` table keyed directly by `supplier_id` (shared primary key, no generated id of its own), not inline columns on `suppliers` — `Supplier`'s own Story 3.1 Javadoc already committed to payment terms being a separate entity, same as prices/SKUs and discount tiers.
+- Mutation (`PUT`) is `ADMIN`/`PURCHASING`-only; `GET` is open to any authenticated role — same role split as Suppliers.
+- Tenancy: the supplier must belong to the caller's company; a cross-tenant supplier id (or a nonexistent one) returns `404`/`NOT_FOUND` on both `PUT` and `GET`.
+
+### The split rule (deposit/balance allocation)
+
+To split an order total by a supplier's terms: `deposit = round(total × depositPercentage / 100)` at `Money`'s standard scale-2/**HALF_EVEN** rounding (via `Money.multiply`, not a separate rounding rule — see Money below), then `balance = total − deposit` (via the new `Money.minus`), **not independently rounded**. This guarantees `deposit + balance` always equals the total exactly, with any odd remainder falling on the balance rather than the deposit. Implemented as `PaymentTerms#split(Money total)`; not wired to any endpoint yet — Feature 7 is the first real caller.
+
+**Decisions made on recommended defaults, pending Product Owner confirmation:**
+- **Deposit precision:** stored as a decimal supporting fractional percentages (e.g. `33.5%`), not integer-only. Costs nothing now; tightens to whole-number-only via validation, no migration, if the PO says otherwise.
+- **Remainder placement:** the balance absorbs the odd penny, not the deposit (deposit stays a clean rounded figure). One-line change (which side is derived) if the PO wants it the other way.
+
+Both are isolated, low-cost-to-reverse choices confined to `PaymentTerms#split`.
+
+---
+
 ## Money
 
 **Owner:** Cleanup Story 4 (money serialisation & rounding rule).
@@ -115,7 +138,7 @@ Accessing another company's data returns the same `404`/`NOT_FOUND` as a genuine
 - **Internal type:** `BigDecimal` server-side, never `double`/`float`, for every monetary value.
 - **Rounding mode:** `HALF_EVEN` ("banker's rounding") — not `HALF_UP`. Ties round to whichever neighbor is even (`0.125` → `0.12`, `0.135` → `0.14`), rather than always rounding away from zero.
 - **Rounding step:** each line-level amount is rounded to 2 decimal places the moment it's computed; totals are sums of already-rounded values, never a sum of full-precision intermediates rounded once at the end. This means displayed line items always sum to the displayed total — the alternative (round-only-the-final-sum) can be a cent off from what's shown.
-- **Implementation:** `com.shvoy.Money` (record: `amount` + `currency`) is the one monetary type — every field that's money should be a `Money`, not a raw `BigDecimal`. Its compact constructor enforces scale-2/`HALF_EVEN` on construction, including on every result of `plus`/`multiply`, so the rounding-step rule above is structural rather than a convention each call site has to remember. Wire (de)serialisation to/from the string format is built in (`MoneyAmountSerializer`/`MoneyAmountDeserializer`) — no per-field `@JsonFormat` needed anywhere `Money` is used.
+- **Implementation:** `com.shvoy.Money` (record: `amount` + `currency`) is the one monetary type — every field that's money should be a `Money`, not a raw `BigDecimal`. Its compact constructor enforces scale-2/`HALF_EVEN` on construction, including on every result of `plus`/`minus`/`multiply`, so the rounding-step rule above is structural rather than a convention each call site has to remember. Wire (de)serialisation to/from the string format is built in (`MoneyAmountSerializer`/`MoneyAmountDeserializer`) — no per-field `@JsonFormat` needed anywhere `Money` is used.
 
 **Still open, deferred to Feature 3 (no monetary fields exist in the codebase yet, so these don't have a concrete case to resolve against):**
 - **Currency scope** — is SHVOY single-currency (e.g. USD only) for the pilot, or does multi-currency need to actually work? `Money` carries a currency code either way (validated as a real ISO 4217 code), but no conversion logic exists, and none is planned until this is answered.
@@ -152,3 +175,4 @@ Rule already agreed: business dates are `LocalDate` (serialises as `yyyy-MM-dd`)
 - Cleanup Story 5: held entirely, pending Feature 3's container-fill work — not started.
 - Feature 3, Story 3.1: `Supplier` entity + tenant-scoped repository (no endpoints yet).
 - Feature 3, Story 3.2: added Suppliers section — CRUD endpoints, `DUPLICATE_SUPPLIER` code, default list filter/sort.
+- Feature 3, Story 3.3: added Payment terms section — `PaymentTerms` entity/endpoints, the deposit/balance split rule (HALF_EVEN, remainder on balance), added `Money.minus`.

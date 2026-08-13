@@ -73,6 +73,15 @@ public record Money(
         return new Money(amount.multiply(factor), currency);
     }
 
+    /**
+     * Subtracting two already-rounded amounts is exact at scale 2, same
+     * reasoning as {@link #plus} — no further rounding is introduced.
+     */
+    public Money minus(Money other) {
+        requireSameCurrency(other);
+        return new Money(amount.subtract(other.amount), currency);
+    }
+
     private void requireSameCurrency(Money other) {
         if (!currency.equals(other.currency)) {
             throw new IllegalArgumentException("Currency mismatch: " + currency + " vs " + other.currency);
