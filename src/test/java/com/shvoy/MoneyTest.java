@@ -48,6 +48,22 @@ class MoneyTest {
     }
 
     @Test
+    void minusIsExactForTwoAlreadyRoundedAmounts() {
+        Money total = new Money(new BigDecimal("100.01"), "USD");
+        Money deposit = new Money(new BigDecimal("30.00"), "USD");
+
+        assertThat(total.minus(deposit).amount()).isEqualByComparingTo("70.01");
+    }
+
+    @Test
+    void minusRejectsMismatchedCurrencies() {
+        Money usd = new Money(BigDecimal.TEN, "USD");
+        Money gbp = new Money(BigDecimal.TEN, "GBP");
+
+        assertThatThrownBy(() -> usd.minus(gbp)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void rejectsAnInvalidCurrencyCode() {
         assertThatThrownBy(() -> new Money(BigDecimal.TEN, "NOT_A_CURRENCY"))
             .isInstanceOf(IllegalArgumentException.class);
