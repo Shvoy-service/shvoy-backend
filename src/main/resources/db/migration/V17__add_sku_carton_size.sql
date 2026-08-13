@@ -1,0 +1,1 @@
+ALTER TABLE skus ADD COLUMN carton_size INTEGER;
