@@ -90,6 +90,17 @@ public class SkuPrice extends TenantScoped {
         return !asOf.isBefore(validFrom) && (validTo == null || !asOf.isAfter(validTo));
     }
 
+    /**
+     * Bounds this row's window — Story 3.5's auto-close step of adding a
+     * later price: the prior open row is closed the day before the new
+     * row's {@code validFrom}, never mutated in value. Not a general setter
+     * — SkuService is the only caller, as part of the supersession rule.
+     */
+    public void close(LocalDate validTo) {
+        this.validTo = validTo;
+        this.updatedAt = Instant.now();
+    }
+
     public UnitPrice getUnitPrice() {
         return new UnitPrice(unitPriceAmount, currency);
     }

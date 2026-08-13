@@ -5,11 +5,15 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
+
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -25,6 +29,7 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.shvoy.LocalIdentityProvider;
@@ -51,7 +56,13 @@ class InviteAcceptanceControllerTest {
     @Autowired
     JdbcTemplate jdbcTemplate;
 
-    @Autowired
+    /**
+     * A spy, not a plain @Autowired bean, so concurrentDoubleSubmitActivatesAtMostOnce
+     * can force a deterministic race (see that test) — every other test here
+     * gets the real LocalIdentityProvider behaviour unchanged, since nothing
+     * stubs the spy outside that one test.
+     */
+    @MockitoSpyBean
     LocalIdentityProvider localIdentityProvider;
 
     final UUID companyA = UUID.randomUUID();
@@ -158,6 +169,27 @@ class InviteAcceptanceControllerTest {
     void concurrentDoubleSubmitActivatesAtMostOnce() throws Exception {
         String email = uniqueEmail();
         String rawToken = invite(email, "FINANCE");
+
+        /*
+         * RegistrationService.activate() reads the token row, then calls
+         * identityProvider.createConfirmedUser(...), then does the atomic
+         * conditional UPDATE that decides the winner. Without forcing it,
+         * nothing guarantees the two requests below actually overlap at
+         * that read — the OS/JVM scheduler could just as easily run one
+         * request to completion (including its UPDATE, which clears
+         * verification_token) before the other's SELECT even happens,
+         * which makes the loser fail at the token lookup instead of racing
+         * at all, and never call createConfirmedUser. A 2-party barrier
+         * here forces both threads to reach createConfirmedUser (i.e. to
+         * have already passed their SELECT) before either is allowed to
+         * proceed into it and then the UPDATE — makes the race, and thus
+         * this test, deterministic instead of dependent on scheduling luck.
+         */
+        CyclicBarrier bothRequestsPastTokenRead = new CyclicBarrier(2);
+        doAnswer(invocation -> {
+            bothRequestsPastTokenRead.await();
+            return invocation.callRealMethod();
+        }).when(localIdentityProvider).createConfirmedUser(anyString(), anyString());
 
         Callable<Integer> attemptA = () -> mockMvc.perform(post("/api/onboarding/invite/accept")
                 .contentType(MediaType.APPLICATION_JSON)
