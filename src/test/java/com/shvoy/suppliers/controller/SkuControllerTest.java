@@ -320,4 +320,75 @@ class SkuControllerTest {
             .andExpect(status().isForbidden())
             .andExpect(jsonPath("$.code").value("FORBIDDEN"));
     }
+
+    // --- carton size (Story 3.7) ---
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void updateSetsCartonSize() throws Exception {
+        UUID skuId = createSku(supplierAId, "SKU-1", "2026-01-01", null);
+
+        mockMvc.perform(put("/api/suppliers/{id}/skus/{skuId}", supplierAId, skuId)
+                .header(TENANT_HEADER, companyA.toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"code\":\"SKU-1\",\"status\":\"ACTIVE\",\"cartonSize\":24}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.cartonSize").value(24));
+
+        Integer stored = jdbcTemplate.queryForObject(
+            "SELECT carton_size FROM skus WHERE id = ?", Integer.class, skuId);
+        assertThat(stored).isEqualTo(24);
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void updateWithoutCartonSizeLeavesItNull() throws Exception {
+        UUID skuId = createSku(supplierAId, "SKU-1", "2026-01-01", null);
+
+        mockMvc.perform(put("/api/suppliers/{id}/skus/{skuId}", supplierAId, skuId)
+                .header(TENANT_HEADER, companyA.toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"code\":\"SKU-1\",\"status\":\"ACTIVE\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.cartonSize").doesNotExist());
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void updateWithZeroCartonSizeReturnsValidationError() throws Exception {
+        UUID skuId = createSku(supplierAId, "SKU-1", "2026-01-01", null);
+
+        mockMvc.perform(put("/api/suppliers/{id}/skus/{skuId}", supplierAId, skuId)
+                .header(TENANT_HEADER, companyA.toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"code\":\"SKU-1\",\"status\":\"ACTIVE\",\"cartonSize\":0}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void updateWithNegativeCartonSizeReturnsValidationError() throws Exception {
+        UUID skuId = createSku(supplierAId, "SKU-1", "2026-01-01", null);
+
+        mockMvc.perform(put("/api/suppliers/{id}/skus/{skuId}", supplierAId, skuId)
+                .header(TENANT_HEADER, companyA.toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"code\":\"SKU-1\",\"status\":\"ACTIVE\",\"cartonSize\":-5}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    @WithMockUser(roles = "ADMIN")
+    void updateCartonSizeForAnotherCompanysSkuReturnsNotFound() throws Exception {
+        UUID skuId = seedSku(supplierAId, companyA, "SKU-1");
+
+        mockMvc.perform(put("/api/suppliers/{id}/skus/{skuId}", supplierAId, skuId)
+                .header(TENANT_HEADER, companyB.toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"code\":\"SKU-1\",\"status\":\"ACTIVE\",\"cartonSize\":12}"))
+            .andExpect(status().isNotFound())
+            .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    }
 }

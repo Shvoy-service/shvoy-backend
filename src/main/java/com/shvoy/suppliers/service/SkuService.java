@@ -68,7 +68,7 @@ public class SkuService {
     public SkuResponse updateSku(UUID supplierId, UUID skuId, UpdateSkuRequest request) {
         Sku sku = findOwnSkuUnderSupplier(supplierId, skuId);
         assertCodeAvailable(supplierId, request.code(), skuId);
-        sku.update(request.code(), request.description(), request.status());
+        sku.update(request.code(), request.description(), request.status(), request.cartonSize());
         return toSkuResponse(saveGuardingCodeUniqueness(sku));
     }
 
@@ -196,7 +196,7 @@ public class SkuService {
 
     private static SkuResponse toSkuResponse(Sku sku) {
         return new SkuResponse(sku.getId(), sku.getSupplierId(), sku.getCode(), sku.getDescription(),
-            sku.getStatus(), sku.getCreatedAt(), sku.getUpdatedAt());
+            sku.getStatus(), sku.getCartonSize(), sku.getCreatedAt(), sku.getUpdatedAt());
     }
 
     private static SkuPriceResponse toSkuPriceResponse(SkuPrice price) {

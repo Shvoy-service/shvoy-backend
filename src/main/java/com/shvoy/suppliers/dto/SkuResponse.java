@@ -11,6 +11,7 @@ public record SkuResponse(
     String code,
     String description,
     SkuStatus status,
+    Integer cartonSize,
     Instant createdAt,
     Instant updatedAt
 ) {
