@@ -13,6 +13,7 @@ import com.shvoy.reconciliation.domain.ProformaInvoice;
 import com.shvoy.reconciliation.domain.Reconciliation;
 import com.shvoy.reconciliation.domain.ReconciliationFindingType;
 import com.shvoy.reconciliation.domain.ReconciliationLine;
+import com.shvoy.reconciliation.domain.ReconciliationAuditEventType;
 import com.shvoy.reconciliation.domain.ReconciliationOutcome;
 import com.shvoy.reconciliation.repository.ProformaInvoiceRepository;
 import com.shvoy.reconciliation.repository.ReconciliationLineRepository;
@@ -42,16 +43,19 @@ public class ToleranceEvaluationService {
     private final ReconciliationLineRepository reconciliationLineRepository;
     private final ProformaInvoiceRepository proformaInvoiceRepository;
     private final ToleranceService toleranceService;
+    private final ReconciliationAuditService reconciliationAuditService;
 
     ToleranceEvaluationService(
             ReconciliationRepository reconciliationRepository,
             ReconciliationLineRepository reconciliationLineRepository,
             ProformaInvoiceRepository proformaInvoiceRepository,
-            ToleranceService toleranceService) {
+            ToleranceService toleranceService,
+            ReconciliationAuditService reconciliationAuditService) {
         this.reconciliationRepository = reconciliationRepository;
         this.reconciliationLineRepository = reconciliationLineRepository;
         this.proformaInvoiceRepository = proformaInvoiceRepository;
         this.toleranceService = toleranceService;
+        this.reconciliationAuditService = reconciliationAuditService;
     }
 
     @Transactional
@@ -70,6 +74,14 @@ public class ToleranceEvaluationService {
         reconciliationRepository.save(reconciliation);
 
         applyToProformaInvoice(reconciliation.getProformaInvoiceId(), outcome);
+
+        // Record the tolerance in force at the time, not just the outcome — so a historical
+        // auto-confirm stays explicable ("passed because tolerance was 2% then") after a later change.
+        reconciliationAuditService.record(reconciliation.getProformaInvoiceId(), reconciliationId,
+            outcome == ReconciliationOutcome.AUTO_CONFIRMED
+                ? ReconciliationAuditEventType.AUTO_CONFIRMED
+                : ReconciliationAuditEventType.ROUTED_FOR_APPROVAL,
+            null, "Evaluated against tolerance " + tolerance + "% (in force at the time); outcome " + outcome);
         return outcome;
     }
 

@@ -72,6 +72,7 @@ class ReconciliationControllerTest {
 
     @AfterEach
     void cleanUp() {
+        jdbcTemplate.update("DELETE FROM reconciliation_audit_events WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM reconciliation_lines WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM reconciliations WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM proforma_invoice_lines WHERE company_id IN (?, ?)", companyA, companyB);
@@ -157,7 +158,10 @@ class ReconciliationControllerTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.varianceBasis").value("UNIT_PRICE"))
             .andExpect(jsonPath("$.currencyMismatch").value(false))
-            .andExpect(jsonPath("$.priceFileAsOfDate").value(LocalDate.now().toString()))
+            // The PO generation date is derived from generated_at at UTC (see PurchaseOrderService), so
+            // assert the UTC date, not LocalDate.now() — which diverge for an hour after local midnight in +offset zones.
+            .andExpect(jsonPath("$.priceFileAsOfDate")
+                .value(java.time.LocalDate.ofInstant(java.time.Instant.now(), java.time.ZoneOffset.UTC).toString()))
             .andExpect(jsonPath("$.lines.length()").value(1))
             .andExpect(jsonPath("$.lines[0].findingType").value("MATCHED"))
             .andExpect(jsonPath("$.lines[0].poUnitPrice.amount").value("2.0000"))

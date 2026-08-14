@@ -55,6 +55,9 @@ public class Reconciliation extends TenantScoped {
     @Column(name = "purchase_order_id", nullable = false)
     private UUID purchaseOrderId;
 
+    @Column(name = "supplier_id")
+    private UUID supplierId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "variance_basis", nullable = false, length = 20)
     private VarianceBasis varianceBasis;
@@ -84,10 +87,11 @@ public class Reconciliation extends TenantScoped {
     protected Reconciliation() {
     }
 
-    public Reconciliation(UUID proformaInvoiceId, UUID purchaseOrderId, VarianceBasis varianceBasis,
+    public Reconciliation(UUID proformaInvoiceId, UUID purchaseOrderId, UUID supplierId, VarianceBasis varianceBasis,
             LocalDate priceFileAsOfDate, String poCurrency, String piCurrency, boolean currencyMismatch) {
         this.proformaInvoiceId = proformaInvoiceId;
         this.purchaseOrderId = purchaseOrderId;
+        this.supplierId = supplierId;
         this.varianceBasis = varianceBasis;
         this.priceFileAsOfDate = priceFileAsOfDate;
         this.poCurrency = poCurrency;
@@ -106,6 +110,11 @@ public class Reconciliation extends TenantScoped {
 
     public UUID getPurchaseOrderId() {
         return purchaseOrderId;
+    }
+
+    /** The PO's supplier — carried on the record (5.7) so per-supplier variance-trend queries need no join through the PO. */
+    public UUID getSupplierId() {
+        return supplierId;
     }
 
     public VarianceBasis getVarianceBasis() {
