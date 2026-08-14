@@ -3,6 +3,7 @@ package com.shvoy.purchaseorders.service;
 import java.time.LocalDate;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import org.springframework.stereotype.Service;
@@ -17,6 +18,7 @@ import com.shvoy.TenantGuard;
 import com.shvoy.ValidationException;
 import com.shvoy.purchaseorders.domain.PurchaseOrder;
 import com.shvoy.purchaseorders.domain.PurchaseOrderLine;
+import com.shvoy.purchaseorders.domain.PurchaseOrderSend;
 import com.shvoy.purchaseorders.domain.PurchaseOrderStatus;
 import com.shvoy.purchaseorders.dto.CreatePurchaseOrderRequest;
 import com.shvoy.purchaseorders.dto.PurchaseOrderLineResponse;
@@ -24,6 +26,7 @@ import com.shvoy.purchaseorders.dto.PurchaseOrderResponse;
 import com.shvoy.purchaseorders.dto.UpdateRequestedEtdRequest;
 import com.shvoy.purchaseorders.repository.PurchaseOrderLineRepository;
 import com.shvoy.purchaseorders.repository.PurchaseOrderRepository;
+import com.shvoy.purchaseorders.repository.PurchaseOrderSendRepository;
 import com.shvoy.suppliers.service.SupplierService;
 
 /**
@@ -38,15 +41,18 @@ public class PurchaseOrderService {
 
     private final PurchaseOrderRepository purchaseOrderRepository;
     private final PurchaseOrderLineRepository purchaseOrderLineRepository;
+    private final PurchaseOrderSendRepository purchaseOrderSendRepository;
     private final SupplierService supplierService;
     private final PoNumberGenerator poNumberGenerator;
 
     PurchaseOrderService(PurchaseOrderRepository purchaseOrderRepository,
             PurchaseOrderLineRepository purchaseOrderLineRepository,
+            PurchaseOrderSendRepository purchaseOrderSendRepository,
             SupplierService supplierService,
             PoNumberGenerator poNumberGenerator) {
         this.purchaseOrderRepository = purchaseOrderRepository;
         this.purchaseOrderLineRepository = purchaseOrderLineRepository;
+        this.purchaseOrderSendRepository = purchaseOrderSendRepository;
         this.supplierService = supplierService;
         this.poNumberGenerator = poNumberGenerator;
     }
@@ -127,13 +133,17 @@ public class PurchaseOrderService {
         }
     }
 
-    /** Package-visible: reused by {@link PurchaseOrderLineService}/{@code PurchaseOrderGenerationService} to return the same full representation after a mutation. */
+    /** Package-visible: reused by {@link PurchaseOrderLineService}/{@code PurchaseOrderGenerationService}/{@code PurchaseOrderSendService} to return the same full representation after a mutation. */
     PurchaseOrderResponse toResponse(PurchaseOrder purchaseOrder) {
         List<PurchaseOrderLineResponse> lines = purchaseOrderLineRepository.findAll().stream()
             .filter(line -> line.getPurchaseOrderId().equals(purchaseOrder.getId()))
             .sorted(Comparator.comparingInt(PurchaseOrderLine::getLineNumber))
             .map(PurchaseOrderService::toLineResponse)
             .toList();
+
+        Optional<PurchaseOrderSend> latestSend = purchaseOrderSendRepository.findAll().stream()
+            .filter(send -> send.getPurchaseOrderId().equals(purchaseOrder.getId()))
+            .max(Comparator.comparing(PurchaseOrderSend::getSentAt));
 
         return new PurchaseOrderResponse(
             purchaseOrder.getId(),
@@ -149,7 +159,9 @@ public class PurchaseOrderService {
             purchaseOrder.getCreatedAt(),
             purchaseOrder.getUpdatedAt(),
             purchaseOrder.getGeneratedBy(),
-            purchaseOrder.getGeneratedAt());
+            purchaseOrder.getGeneratedAt(),
+            latestSend.map(PurchaseOrderSend::getSentBy).orElse(null),
+            latestSend.map(PurchaseOrderSend::getSentAt).orElse(null));
     }
 
     private static PurchaseOrderLineResponse toLineResponse(PurchaseOrderLine line) {

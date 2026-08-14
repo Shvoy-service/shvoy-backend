@@ -32,9 +32,9 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.shvoy.ConsoleEmailSender;
 import com.shvoy.LocalIdentityProvider;
 import com.shvoy.LogCapture;
-import com.shvoy.onboarding.service.InvitationService;
 
 /**
  * No class-level @Transactional — see TenantIsolationTest for why. The
@@ -230,7 +230,7 @@ class InviteAcceptanceControllerTest {
     }
 
     private String invite(String email, String role) throws Exception {
-        try (LogCapture logs = new LogCapture(InvitationService.class)) {
+        try (LogCapture logs = new LogCapture(ConsoleEmailSender.class)) {
             mockMvc.perform(post("/api/onboarding/company/{companyId}/invite", companyA)
                     .header(TENANT_HEADER, companyA.toString())
                     .contentType(MediaType.APPLICATION_JSON)
