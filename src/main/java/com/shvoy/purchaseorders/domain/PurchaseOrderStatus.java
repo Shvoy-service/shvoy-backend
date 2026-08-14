@@ -1,13 +1,16 @@
 package com.shvoy.purchaseorders.domain;
 
 /**
- * Deliberately minimal for Story 4.1 — DRAFT/GENERATED/SENT covers this
- * feature's own lifecycle; later features (confirmation via PI, closure)
- * extend this rather than tracking their own state elsewhere, but that
- * extension isn't needed yet.
+ * DRAFT/GENERATED/SENT cover the feature's own lifecycle (3.1); CANCELLED
+ * (4.4) is a draft's soft-delete/abandon terminal state — only reachable
+ * from DRAFT (see PurchaseOrder#cancel), never from GENERATED/SENT, which
+ * have their own separate lifecycle not modelled here yet. Later features
+ * (confirmation via PI, closure) extend this further rather than tracking
+ * their own state elsewhere.
  */
 public enum PurchaseOrderStatus {
     DRAFT,
     GENERATED,
-    SENT
+    SENT,
+    CANCELLED
 }

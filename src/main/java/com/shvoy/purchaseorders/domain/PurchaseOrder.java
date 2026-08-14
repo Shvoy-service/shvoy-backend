@@ -120,6 +120,39 @@ public class PurchaseOrder extends TenantScoped {
         this.updatedAt = Instant.now();
     }
 
+    /**
+     * Story 4.4. Past-date rejection is a service-layer concern (it needs
+     * "today", which is a policy the entity shouldn't own) — this just
+     * stores whatever it's given, including {@code null} to clear it.
+     */
+    public void setRequestedEtd(LocalDate requestedEtd) {
+        this.requestedEtd = requestedEtd;
+        this.updatedAt = Instant.now();
+    }
+
+    /**
+     * Story 4.4's soft-delete for a draft — {@link PurchaseOrderStatus#CANCELLED}
+     * is terminal, never reached from {@code GENERATED}/{@code SENT} (the
+     * service layer enforces the DRAFT-only precondition via
+     * {@link #isEditable} before calling this; this method itself doesn't
+     * re-check, same trust-the-caller convention as {@code Supplier#deactivate}).
+     */
+    public void cancel() {
+        this.status = PurchaseOrderStatus.CANCELLED;
+        this.updatedAt = Instant.now();
+    }
+
+    /**
+     * Story 4.4's status guard: every mutation (lines, ETD, cancel) is only
+     * permitted while the PO is still a DRAFT — once {@code GENERATED}/
+     * {@code SENT}/{@code CANCELLED}, it's frozen. Checked by the service
+     * layer before each mutation, which throws {@code PO_NOT_EDITABLE}
+     * rather than silently no-opping.
+     */
+    public boolean isEditable() {
+        return status == PurchaseOrderStatus.DRAFT;
+    }
+
     public UUID getId() {
         return id;
     }

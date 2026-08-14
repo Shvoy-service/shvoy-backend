@@ -35,7 +35,7 @@ Allowed origins are entirely config-driven (`shvoy.cors.allowed-origins`, comma-
 Other decisions:
 
 - **`allowedOriginPatterns`, not `allowedOrigins`** — needed to express the Cloudflare per-PR wildcard once its domain is known; `allowedOrigins` doesn't support wildcards.
-- **Allowed headers:** `Authorization`, `Content-Type`, `X-Correlation-Id` (sent by the frontend on every request) everywhere; `X-Debug-Company-Id` additionally in `local`/`test` only — that header does nothing outside those profiles (see `TenantContextFilter`), so it isn't advertised as meaningful elsewhere.
+- **Allowed headers:** `Authorization`, `Content-Type`, `X-Correlation-Id` (sent by the frontend on every request) everywhere; `X-Debug-Company-Id` and `X-Debug-User-Id` (the latter added Story 4.4) additionally in `local`/`test` only — neither header does anything outside those profiles (see `TenantContextFilter`), so neither is advertised as meaningful elsewhere.
 - **`allowCredentials: false`** — the Cognito access token travels in the `Authorization` header, not a cookie, so the browser never needs to send credentials for this API. Deliberate, not the framework default; revisit explicitly if a cookie-based flow is ever introduced.
 - Dev and prod have **no default** for `shvoy.cors.allowed-origins` — startup fails loudly if it's unset, rather than silently allowing nothing (or something unintended) while the real domains are still unknown.
 
@@ -83,6 +83,7 @@ Every error response across the API — validation, not-found, conflict, forbidd
 | `DUPLICATE_SKU` | 409 | A SKU with this code (case-insensitive) already exists for this supplier |
 | `AMBIGUOUS_PRICE_WINDOW` | 409 | A new SkuPrice's validity window can't be reconciled with a SKU's existing prices without guessing (backdated/duplicate start, an overlap, or a gap) — see SKU & price entry/upload below |
 | `CURRENCY_MISMATCH` | 409 | A PO line resolved to a different currency than the PO's existing lines — see Purchase orders below |
+| `PO_NOT_EDITABLE` | 409 | Attempted to mutate (add/edit/remove a line, set ETD, cancel) a PO that isn't `DRAFT` — see Purchase orders below |
 | `LAST_ACTIVE_ADMIN` | 409 | Change would leave the company with zero active admins |
 | `INVALID_INVITE` | 404 | Registration/invite token is unknown, expired, or already used — kept deliberately generic; doesn't distinguish which, to avoid leaking token state to an unauthenticated caller |
 | `NOT_FOUND` | 404 | Resource doesn't exist, or exists in a different company (cross-tenant access returns the same `NOT_FOUND` as a genuine absence — see Multi-tenancy below — never a distinct code) |
@@ -273,10 +274,10 @@ Multi-currency conversion/comparison (the resolved price simply carries its `Sku
 
 ## Purchase orders
 
-**Owner:** Story 4.1 (PO data model) and 4.2 (line pricing & validation). Still no create/edit endpoints (4.4), no generation/sending — `PurchaseOrder`/`PurchaseOrderLine` are reachable only via direct repository/service access until then.
+**Owner:** Story 4.1 (PO data model), 4.2 (line pricing & validation), 4.3 (totals & money composition), 4.4 (creation & draft management). No generation/sending yet (4.6/4.7) — a PO never leaves `DRAFT` through any endpoint that exists so far.
 
-- `PurchaseOrder` — tenant-scoped, one `supplier_id` (a PO is to exactly one supplier), a per-company sequential `po_number` (see below), `status` (`DRAFT`/`GENERATED`/`SENT`, string not ordinal, modelled for clean extension by later features), nullable `requested_etd` (`LocalDate`), `created_by` (plain `UUID` referencing `users.id`, no JPA relationship — same flat-column convention as `Supplier`/`Sku`).
-- `PurchaseOrderLine` — tenant-scoped, linked to its `PurchaseOrder` and a `sku_id`, `line_number` (stable display order) and `quantity` (both required at creation, whenever 4.4 adds the endpoint that creates one), plus the **price snapshot** fields below.
+- `PurchaseOrder` — tenant-scoped, one `supplier_id` (a PO is to exactly one supplier), a per-company sequential `po_number` (see below), `status` (`DRAFT`/`GENERATED`/`SENT`/`CANCELLED`, string not ordinal, modelled for clean extension by later features — `CANCELLED` added by 4.4, a draft-only soft-delete terminal state), nullable `requested_etd` (`LocalDate`), `created_by` (plain `UUID` referencing `users.id`, no JPA relationship — same flat-column convention as `Supplier`/`Sku`).
+- `PurchaseOrderLine` — tenant-scoped, linked to its `PurchaseOrder` and a `sku_id`, `line_number` (stable display order, assigned sequentially by 4.4's add-line endpoint) and `quantity`, plus the **price snapshot** fields below.
 
 ### The price-snapshot principle
 
@@ -314,6 +315,29 @@ Per-company sequential, `PO-0001` style (`PoNumberGenerator`) — matches the wi
 
 Race-safe under concurrent claims for the same company via a `SELECT ... FOR UPDATE` lock on a dedicated `po_number_counters` row (one per company, owned by the purchaseorders module rather than added to `companies`, which belongs to onboarding) — same lock-based approach as `SkuService#lockSkuForPriceWrite` (see SKU & price entry/upload above). Ensuring that counter row exists and then locking/incrementing it run as two **sequential, non-nested** steps, deliberately: an earlier version isolated the row-creation step in its own `REQUIRES_NEW` transaction so a lost race there couldn't poison the claim's transaction (Postgres aborts an entire transaction after any failed statement — catching the exception and continuing in the *same* transaction only happens to work under H2, not for real against Postgres), but `REQUIRES_NEW` suspends rather than releases the caller's connection, so every concurrent caller needed two connections held at once — confirmed the hard way when 10 concurrent claims deadlocked a 10-connection pool outright. Running the two steps sequentially instead means each caller only ever holds one connection at a time.
 
+### Creation & draft management (Story 4.4)
+
+The workflow layer wiring 4.1/4.2/4.3 into real endpoints — introduces no new domain decisions of its own, only how the model/pricing/totals get exposed and guarded. Drawn boundary against 4.5: this story owns creating and editing a draft; 4.5 owns what happens when a draft with an expired-price line is *finalised*.
+
+| Method | Path | Role | Notes |
+|---|---|---|---|
+| `POST` | `/api/purchase-orders` | ADMIN/PURCHASING | Creates a `DRAFT` for `{ supplierId }`. Cross-tenant/nonexistent supplier → `NOT_FOUND`. |
+| `GET` | `/api/purchase-orders` | Any authenticated | List, tenant-scoped. Optional `?status=` filter (`DRAFT`/`GENERATED`/`SENT`/`CANCELLED`); omitted returns all of the caller's own POs. No pagination — pilot scale. |
+| `GET` | `/api/purchase-orders/{id}` | Any authenticated | Full representation — lines and totals included. |
+| `POST` | `/api/purchase-orders/{id}/lines` | ADMIN/PURCHASING | Adds a line (`{ skuId, quantity }`), assigns the next `line_number`, then calls `PurchaseOrderLinePricingService#priceLine` (which itself recomputes totals) — the pricing/totalling logic is invoked, never reimplemented here. |
+| `PUT` | `/api/purchase-orders/{id}/lines/{lineId}` | ADMIN/PURCHASING | Full-replace of `{ skuId, quantity }`, then re-prices the same way as add. |
+| `DELETE` | `/api/purchase-orders/{id}/lines/{lineId}` | ADMIN/PURCHASING | Removes the line, then calls `PurchaseOrderTotalsService#recompute` directly (no pricing step to trigger it this time). |
+| `PUT` | `/api/purchase-orders/{id}/etd` | ADMIN/PURCHASING | Sets/updates `requestedEtd` (`{ requestedEtd }`, `LocalDate`). A past date is rejected (`VALIDATION_ERROR`) — today itself is accepted, only strictly-before-today is rejected. |
+| `DELETE` | `/api/purchase-orders/{id}` | ADMIN/PURCHASING | Soft-cancel: sets `status` to `CANCELLED`. Not a hard delete. |
+
+Every mutating endpoint returns the **full** `PurchaseOrderResponse` (status, ETD, totals, and the complete current line list) rather than a bare ack — a caller never needs a follow-up `GET` to see what its own write produced, same convention as `SkuWithPriceResponse`.
+
+**Status guard — DRAFT-only mutation:** every mutation above (lines, ETD, cancel) requires `status == DRAFT`; attempting any of them against `GENERATED`/`SENT`/`CANCELLED` returns `PO_NOT_EDITABLE`/409, never a silent no-op. Enforced once, centrally, by `PurchaseOrderService#assertEditable`, reused by `PurchaseOrderLineService` rather than re-checked per endpoint.
+
+**PO number assigned at creation**, not deferred to generation (4.6) — a pilot-scale default: an abandoned draft leaves a gap in the per-company sequence, an accepted cost in exchange for not needing a separate "assign a number" step later.
+
+**`created_by`/current-user identity:** this story is the first to need "which user made this request," not just "which company" — added `CurrentUserContext` (mirrors `TenantContext`, same resolution point in `TenantContextFilter`: the JWT's `shvoy_user_id` claim in dev/prod, the new `X-Debug-User-Id` header in `local`/`test`). Unlike the company header, there is **no fallback default** for the user header — a caller needing the current user without supplying it fails loudly, consistent with how a missing tenant already behaves.
+
 ---
 
 ## Dates and timestamps
@@ -325,7 +349,7 @@ Rule: business dates are `LocalDate` (serialises as `yyyy-MM-dd`), real points i
 | Field | Type | Status |
 |---|---|---|
 | SKU price validity dates (`valid_from`/`valid_to`) | `LocalDate` | Implemented — Story 3.4, `SkuPrice` |
-| Requested ETD | `LocalDate` | Not yet implemented (Feature 4) |
+| Requested ETD | `LocalDate` | Implemented — Story 4.4, `PurchaseOrder#requestedEtd` |
 | Confirmed ETD | `LocalDate` | Not yet implemented (Feature 4) |
 | Payment anchor date (the real date an order's BL/invoice/arrival occurred, as opposed to `PaymentTerms.anchorEvent`, which only names *which kind* of event) | `LocalDate` | Not yet implemented — lands against a real order, Feature 7 |
 | All `created_at`/`updated_at` timestamps | `Instant` (UTC) | Implemented throughout |
@@ -354,3 +378,4 @@ Rule: business dates are `LocalDate` (serialises as `yyyy-MM-dd`), real points i
 - Feature 4, Story 4.1 (first story of the feature): added the Purchase orders section — `PurchaseOrder`/`PurchaseOrderLine` entities, model only (no endpoints yet). Established the price-snapshot principle (a line stores the price it was created with, never a live `SkuPrice` reference) and per-company sequential PO numbering (`PoNumberGenerator`, `po_number_counters`), lock-based and race-safe — the concurrency approach went through two iterations before landing on one that's safe under both Postgres's poisoned-transaction behavior and real connection-pool limits (see that section for what didn't work and why).
 - Feature 4, Story 4.2: added the Line pricing subsection — `PurchaseOrderLinePricingService` wires a line to 3.8 as of the current/draft date, snapshotting price/tier/carton/validity in one shot via `PurchaseOrderLine#applyPriceResolution`. Added `CURRENCY_MISMATCH`. Two things it inherits rather than reimplements: the pending carton-rounding-rule PO question (via 3.7's shared rule) and SKU/supplier ownership enforcement (via `PriceResolutionService`'s own check). One new decision it introduces, flagged for PO confirmation: single currency per PO.
 - Feature 4, Story 4.3: added the Totals & money composition subsection — the Money contract's rules run for real for the first time. Added `UnitPrice#multiply` (line total: round the raw 4dp x quantity product once, HALF_EVEN) and `PurchaseOrderTotalsService` (order total: sum of already-rounded line totals, never a rounded sum of unrounded values; deposit/balance split via `PaymentTerms#split`, amounts only — due dates stay Feature 7's). Wired into `PurchaseOrderLinePricingService` so totals never go stale after a line is (re)priced. Tests deliberately engineer fixtures where sum-of-rounded diverges from round-of-sum, and where HALF_EVEN diverges from HALF_UP, rather than relying on incidental numbers.
+- Feature 4, Story 4.4: added the Creation & draft management subsection — the first real PO endpoints (create/list/get, add/edit/remove line, set ETD, cancel), all wiring together 4.1/4.2/4.3 rather than introducing new domain logic. Added `PurchaseOrderStatus.CANCELLED` (draft-only soft-delete), `PO_NOT_EDITABLE` (the DRAFT-only mutation guard, centralised in `PurchaseOrderService#assertEditable`), and `CurrentUserContext` (mirrors `TenantContext` for "current user," first needed for `createdBy`; resolved the same way, including a new `X-Debug-User-Id` header in `local`/`test` with, deliberately, no fallback default). PO number assignment stays at creation time (pilot-scale default: abandoned drafts leave sequence gaps, an accepted cost) and a past requested ETD is rejected — both confirmed rather than left open. Settled the Dates and timestamps table's Requested ETD row.

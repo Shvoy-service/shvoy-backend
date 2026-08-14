@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.UUID;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.modulith.NamedInterface;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,7 +32,15 @@ import com.shvoy.suppliers.repository.SupplierRepository;
  * TenantContextFilter), unlike registration/invite-acceptance, which have
  * to establish the tenant as part of the operation itself. This mirrors
  * TeamManagementService/CompanyProfileService, not RegistrationService.
+ *
+ * {@link #assertOwnSupplierExists} is this class's cross-module surface
+ * (Story 4.4) — {@code @NamedInterface}, same pattern as
+ * {@code PriceResolutionService}/{@code PaymentTermsService}, so another
+ * module (purchaseorders) can confirm a supplier id belongs to its own
+ * tenant without {@code SupplierRepository}/{@code Supplier} being exposed
+ * directly.
  */
+@NamedInterface("suppliers")
 @Service
 public class SupplierService {
 
@@ -81,6 +90,16 @@ public class SupplierService {
         Supplier supplier = findOwnSupplier(id);
         supplier.deactivate();
         return toResponse(supplierRepository.save(supplier));
+    }
+
+    /**
+     * Throws the same {@link NotFoundException} a missing or cross-tenant
+     * id would throw anywhere else in this module — the cross-module
+     * ownership check itself, with no response body to leak beyond that.
+     */
+    @Transactional(readOnly = true)
+    public void assertOwnSupplierExists(UUID id) {
+        findOwnSupplier(id);
     }
 
     /**

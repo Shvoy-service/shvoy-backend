@@ -134,6 +134,20 @@ public class PurchaseOrderLine extends TenantScoped {
         this.updatedAt = Instant.now();
     }
 
+    /**
+     * Story 4.4's line edit — changes what's being ordered; the price
+     * snapshot itself is left alone here, since the caller (PurchaseOrderLinePricingService)
+     * always re-prices immediately after via {@link #applyPriceResolution}
+     * — same reasoning as that method's own Javadoc: the invariant "if this
+     * line has a unit price, it has a line total" would otherwise briefly go
+     * stale relative to the new sku/quantity.
+     */
+    public void update(UUID skuId, int quantity) {
+        this.skuId = skuId;
+        this.quantity = quantity;
+        this.updatedAt = Instant.now();
+    }
+
     public UUID getId() {
         return id;
     }

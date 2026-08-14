@@ -32,9 +32,10 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
  * deliberately if a cookie-based flow is ever introduced.
  *
  * Two beans, split the same way as SecurityConfig's two filter chains:
- * local/test additionally allow X-Debug-Company-Id, since that's the only
- * place TenantContextFilter honors it at all (see its Javadoc) — allowing it
- * elsewhere would advertise a mechanism that doesn't do anything there.
+ * local/test additionally allow X-Debug-Company-Id/X-Debug-User-Id, since
+ * those are the only place TenantContextFilter honors either at all (see
+ * its Javadoc) — allowing them elsewhere would advertise a mechanism that
+ * doesn't do anything there.
  */
 @Configuration
 class CorsConfig {
@@ -48,6 +49,7 @@ class CorsConfig {
             @Value("${shvoy.cors.allowed-origins}") List<String> allowedOrigins) {
         List<String> allowedHeaders = new ArrayList<>(BASE_ALLOWED_HEADERS);
         allowedHeaders.add("X-Debug-Company-Id");
+        allowedHeaders.add("X-Debug-User-Id");
         return buildSource(allowedOrigins, allowedHeaders);
     }
 
