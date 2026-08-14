@@ -151,7 +151,7 @@ class PurchaseOrderLinePricingServiceTest {
     @Test
     void resolvesLineWithTierApplied() {
         UUID skuId = seedSku(supplierAId, null);
-        UUID priceId = seedPrice(skuId, "2.0000", "GBP", LocalDate.of(2026, 1, 1), null);
+        UUID priceId = seedPrice(skuId, "2.0000", "USD", LocalDate.of(2026, 1, 1), null);
         seedTier(priceId, 100, "1.5000");
         PurchaseOrderLine line = createLine(poAId, skuId, 150);
 
@@ -159,7 +159,7 @@ class PurchaseOrderLinePricingServiceTest {
 
         assertThat(priced.getPriceFound()).isTrue();
         assertThat(priced.getUnitPrice().amount()).isEqualByComparingTo("1.5000");
-        assertThat(priced.getUnitPrice().currency()).isEqualTo("GBP");
+        assertThat(priced.getUnitPrice().currency()).isEqualTo("USD");
         assertThat(priced.getAppliedTierThreshold()).isEqualTo(100);
         assertThat(priced.getPricedAsOfDate()).isEqualTo(LocalDate.now());
         // Story 4.3: the tier price (1.5000) x quantity (150) = 225.00,
@@ -170,7 +170,7 @@ class PurchaseOrderLinePricingServiceTest {
     @Test
     void pricingALineRecomputesThePosOrderTotal() {
         UUID skuId = seedSku(supplierAId, null);
-        seedPrice(skuId, "2.0000", "GBP", LocalDate.of(2026, 1, 1), null);
+        seedPrice(skuId, "2.0000", "USD", LocalDate.of(2026, 1, 1), null);
         PurchaseOrderLine line = createLine(poAId, skuId, 5);
 
         priceLine(line);
@@ -188,7 +188,7 @@ class PurchaseOrderLinePricingServiceTest {
     @Test
     void resolvesBasePriceBelowAllTiers() {
         UUID skuId = seedSku(supplierAId, null);
-        UUID priceId = seedPrice(skuId, "2.0000", "GBP", LocalDate.of(2026, 1, 1), null);
+        UUID priceId = seedPrice(skuId, "2.0000", "USD", LocalDate.of(2026, 1, 1), null);
         seedTier(priceId, 100, "1.5000");
         PurchaseOrderLine line = createLine(poAId, skuId, 50);
 
@@ -202,7 +202,7 @@ class PurchaseOrderLinePricingServiceTest {
     @Test
     void surfacesCartonAdjustmentForANonMultipleQuantity() {
         UUID skuId = seedSku(supplierAId, 10);
-        seedPrice(skuId, "2.0000", "GBP", LocalDate.of(2026, 1, 1), null);
+        seedPrice(skuId, "2.0000", "USD", LocalDate.of(2026, 1, 1), null);
         PurchaseOrderLine line = createLine(poAId, skuId, 22);
 
         PurchaseOrderLine priced = priceLine(line);
@@ -215,7 +215,7 @@ class PurchaseOrderLinePricingServiceTest {
     void flagsAnExpiredPriceWithoutDroppingTheLine() {
         UUID skuId = seedSku(supplierAId, null);
         // Price window entirely in the past - nothing covers today.
-        seedPrice(skuId, "2.0000", "GBP", LocalDate.of(2020, 1, 1), LocalDate.of(2020, 12, 31));
+        seedPrice(skuId, "2.0000", "USD", LocalDate.of(2020, 1, 1), LocalDate.of(2020, 12, 31));
         PurchaseOrderLine line = createLine(poAId, skuId, 10);
 
         PurchaseOrderLine priced = priceLine(line);
@@ -232,7 +232,7 @@ class PurchaseOrderLinePricingServiceTest {
     @Test
     void rejectsASkuThatBelongsToAnotherSupplier() {
         UUID otherSuppliersSkuId = seedSku(otherSupplierId, null);
-        seedPrice(otherSuppliersSkuId, "2.0000", "GBP", LocalDate.of(2026, 1, 1), null);
+        seedPrice(otherSuppliersSkuId, "2.0000", "USD", LocalDate.of(2026, 1, 1), null);
         PurchaseOrderLine line = createLine(poAId, otherSuppliersSkuId, 10);
 
         assertThatThrownBy(() -> priceLine(line)).isInstanceOf(NotFoundException.class);
@@ -240,13 +240,13 @@ class PurchaseOrderLinePricingServiceTest {
 
     @Test
     void rejectsALineThatResolvesToADifferentCurrencyThanThePosExistingLines() {
-        UUID skuGbp = seedSku(supplierAId, null);
-        seedPrice(skuGbp, "2.0000", "GBP", LocalDate.of(2026, 1, 1), null);
-        priceLine(createLine(poAId, skuGbp, 10));
-
         UUID skuUsd = seedSku(supplierAId, null);
-        seedPrice(skuUsd, "3.0000", "USD", LocalDate.of(2026, 1, 1), null);
-        PurchaseOrderLine secondLine = createLine(poAId, skuUsd, 10);
+        seedPrice(skuUsd, "2.0000", "USD", LocalDate.of(2026, 1, 1), null);
+        priceLine(createLine(poAId, skuUsd, 10));
+
+        UUID skuGbp = seedSku(supplierAId, null);
+        seedPrice(skuGbp, "3.0000", "GBP", LocalDate.of(2026, 1, 1), null);
+        PurchaseOrderLine secondLine = createLine(poAId, skuGbp, 10);
 
         // ConflictException.code() is package-private by design (see its
         // Javadoc — only inspectable through the HTTP boundary/ApiExceptionHandler,
@@ -258,7 +258,7 @@ class PurchaseOrderLinePricingServiceTest {
     @Test
     void rejectsNonPositiveQuantity() {
         UUID skuId = seedSku(supplierAId, null);
-        seedPrice(skuId, "2.0000", "GBP", LocalDate.of(2026, 1, 1), null);
+        seedPrice(skuId, "2.0000", "USD", LocalDate.of(2026, 1, 1), null);
         PurchaseOrderLine line = createLine(poAId, skuId, 0);
 
         assertThatThrownBy(() -> priceLine(line)).isInstanceOf(ValidationException.class);
@@ -267,7 +267,7 @@ class PurchaseOrderLinePricingServiceTest {
     @Test
     void aLineReferencingAnotherCompanysPurchaseOrderIsRejected() {
         UUID skuId = seedSku(supplierAId, null);
-        seedPrice(skuId, "2.0000", "GBP", LocalDate.of(2026, 1, 1), null);
+        seedPrice(skuId, "2.0000", "USD", LocalDate.of(2026, 1, 1), null);
         PurchaseOrderLine line = createLine(poBId, skuId, 10);
 
         assertThatThrownBy(() -> priceLine(line)).isInstanceOf(NotFoundException.class);

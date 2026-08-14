@@ -188,7 +188,7 @@ class PurchaseOrderControllerTest {
     void addLineInvokesPricingAndRecomputesTotals() throws Exception {
         UUID poId = createPo(supplierAId);
         UUID skuId = seedSku(supplierAId, companyA);
-        seedPrice(skuId, "2.0000", "GBP", companyA);
+        seedPrice(skuId, "2.0000", "USD", companyA);
 
         mockMvc.perform(post("/api/purchase-orders/{id}/lines", poId)
                 .header(TENANT_HEADER, companyA.toString())
@@ -209,11 +209,11 @@ class PurchaseOrderControllerTest {
     void updateLineRepricesAndRecomputesTotals() throws Exception {
         UUID poId = createPo(supplierAId);
         UUID skuId = seedSku(supplierAId, companyA);
-        seedPrice(skuId, "2.0000", "GBP", companyA);
+        seedPrice(skuId, "2.0000", "USD", companyA);
         UUID lineId = addLine(poId, skuId, 5);
 
         UUID sku2Id = seedSku(supplierAId, companyA);
-        seedPrice(sku2Id, "3.0000", "GBP", companyA);
+        seedPrice(sku2Id, "3.0000", "USD", companyA);
 
         mockMvc.perform(put("/api/purchase-orders/{id}/lines/{lineId}", poId, lineId)
                 .header(TENANT_HEADER, companyA.toString())
@@ -233,7 +233,7 @@ class PurchaseOrderControllerTest {
     void removeLineRecomputesTotalsBackToNullWhenNoLinesRemain() throws Exception {
         UUID poId = createPo(supplierAId);
         UUID skuId = seedSku(supplierAId, companyA);
-        seedPrice(skuId, "2.0000", "GBP", companyA);
+        seedPrice(skuId, "2.0000", "USD", companyA);
         UUID lineId = addLine(poId, skuId, 5);
 
         mockMvc.perform(delete("/api/purchase-orders/{id}/lines/{lineId}", poId, lineId)

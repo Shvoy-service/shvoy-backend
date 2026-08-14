@@ -86,7 +86,7 @@ class PriceResolutionControllerTest {
         UUID id = UUID.randomUUID();
         jdbcTemplate.update(
             "INSERT INTO sku_prices (id, sku_id, unit_price_amount, currency, valid_from, valid_to, created_at, company_id) "
-                + "VALUES (?, ?, ?, 'GBP', ?, ?, ?, ?)",
+                + "VALUES (?, ?, ?, 'USD', ?, ?, ?, ?)",
             id, skuId, new BigDecimal(unitPriceAmount), Date.valueOf(validFrom),
             validTo == null ? null : Date.valueOf(validTo), Timestamp.from(Instant.now()), companyId);
         return id;

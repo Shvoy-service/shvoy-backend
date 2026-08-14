@@ -23,7 +23,7 @@ class UnitPriceTest {
     void keepsPrecisionThatMoneyWouldHaveTruncated() {
         // The exact case this type exists for: a unit price with 4 real
         // decimal places, which Money's 2dp scale would have destroyed.
-        UnitPrice price = new UnitPrice(new BigDecimal("1.4275"), "GBP");
+        UnitPrice price = new UnitPrice(new BigDecimal("1.4275"), "USD");
 
         assertThat(price.amount()).isEqualByComparingTo("1.4275");
     }
@@ -36,16 +36,16 @@ class UnitPriceTest {
 
     @Test
     void serialisesAmountAsAStringNeverABareJsonNumber() throws Exception {
-        String json = objectMapper.writeValueAsString(new UnitPrice(new BigDecimal("1.4275"), "GBP"));
+        String json = objectMapper.writeValueAsString(new UnitPrice(new BigDecimal("1.4275"), "USD"));
 
-        assertThat(json).isEqualTo("{\"amount\":\"1.4275\",\"currency\":\"GBP\"}");
+        assertThat(json).isEqualTo("{\"amount\":\"1.4275\",\"currency\":\"USD\"}");
     }
 
     @Test
     void deserialisesAndRoundTripsThroughTheStringFormat() throws Exception {
-        UnitPrice price = objectMapper.readValue("{\"amount\":\"1.4275\",\"currency\":\"GBP\"}", UnitPrice.class);
+        UnitPrice price = objectMapper.readValue("{\"amount\":\"1.4275\",\"currency\":\"USD\"}", UnitPrice.class);
 
-        assertThat(price).isEqualTo(new UnitPrice(new BigDecimal("1.4275"), "GBP"));
+        assertThat(price).isEqualTo(new UnitPrice(new BigDecimal("1.4275"), "USD"));
     }
 
     // --- multiply (Story 4.3's line-total composition rule) ---
@@ -55,10 +55,10 @@ class UnitPriceTest {
         // 1.4275 x 3 = 4.2825 — doesn't land on a clean 2dp value, so this
         // proves the 4dp price is used at full precision in the
         // multiplication, not truncated to 2dp first.
-        Money total = new UnitPrice(new BigDecimal("1.4275"), "GBP").multiply(3);
+        Money total = new UnitPrice(new BigDecimal("1.4275"), "USD").multiply(3);
 
         assertThat(total.amount()).isEqualByComparingTo("4.28");
-        assertThat(total.currency()).isEqualTo("GBP");
+        assertThat(total.currency()).isEqualTo("USD");
     }
 
     @Test
@@ -73,7 +73,7 @@ class UnitPriceTest {
 
     @Test
     void multiplyLeavesAnAlreadyCleanProductUnchanged() {
-        Money total = new UnitPrice(new BigDecimal("2.5000"), "GBP").multiply(4);
+        Money total = new UnitPrice(new BigDecimal("2.5000"), "USD").multiply(4);
 
         assertThat(total.amount()).isEqualByComparingTo("10.00");
     }

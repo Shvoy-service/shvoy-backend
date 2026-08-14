@@ -65,11 +65,11 @@ class SkuPriceTenantIsolationTest {
         jdbcTemplate.update(
             "INSERT INTO sku_prices (id, sku_id, unit_price_amount, currency, valid_from, created_at, company_id) "
                 + "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            priceAId, skuAId, new BigDecimal("1.4275"), "GBP", LocalDate.now(), now, companyA);
+            priceAId, skuAId, new BigDecimal("1.4275"), "USD", LocalDate.now(), now, companyA);
         jdbcTemplate.update(
             "INSERT INTO sku_prices (id, sku_id, unit_price_amount, currency, valid_from, created_at, company_id) "
                 + "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            priceBId, skuBId, new BigDecimal("2.5000"), "GBP", LocalDate.now(), now, companyB);
+            priceBId, skuBId, new BigDecimal("2.5000"), "USD", LocalDate.now(), now, companyB);
     }
 
     @AfterEach
@@ -107,7 +107,7 @@ class SkuPriceTenantIsolationTest {
         TenantContext.set(companyA);
         try {
             SkuPrice saved = skuPriceRepository.save(
-                new SkuPrice(skuAId, new UnitPrice(new BigDecimal("9.9999"), "GBP"), LocalDate.now(), null));
+                new SkuPrice(skuAId, new UnitPrice(new BigDecimal("9.9999"), "USD"), LocalDate.now(), null));
             newPriceId = saved.getId();
             assertThat(saved.getCompanyId()).isEqualTo(companyA);
         } finally {

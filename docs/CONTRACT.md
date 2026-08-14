@@ -117,7 +117,7 @@ Accessing another company's data returns the same `404`/`NOT_FOUND` as a genuine
 
 - A supplier has at most one payment-terms record: `PUT /api/suppliers/{id}/payment-terms` sets or updates it (full-representation, same PUT-replaces-everything semantics as `SupplierRequest`); `GET /api/suppliers/{id}/payment-terms` retrieves it. A dedicated sub-resource, not folded into `SupplierResponse` — same reasoning as splitting `TeamController` from `CompanyProfileController`.
 - `GET` before terms have ever been set returns `404`/`NOT_FOUND`, same as any other not-yet-existing sub-resource.
-- **Fields:** `depositPercentage` (`BigDecimal`, 0–100 inclusive, fractional values allowed e.g. `33.5`) is the only percentage stored. `balancePercentage` in the response is always `100 − depositPercentage`, computed on read — never an independent stored/validated field, so the two can't drift out of sync. `anchorEvent` is one of `BL`/`INVOICE`/`ARRIVAL`; `daysOffset` is a non-negative integer.
+- **Fields:** `depositPercentage` (`BigDecimal`, 0–100 inclusive, fractional values allowed up to **1 decimal place** — `33.5` valid, `33.55` rejected as `VALIDATION_ERROR` — confirmed by the Product Owner, Consolidation ticket) is the only percentage stored. `balancePercentage` in the response is always `100 − depositPercentage`, computed on read — never an independent stored/validated field, so the two can't drift out of sync. `anchorEvent` is one of `BL`/`INVOICE`/`ARRIVAL`/`EX_FACTORY` (the fourth value added by the Consolidation ticket, matching Roadmap v2's anchor options); `daysOffset` is a non-negative integer.
 - **Model:** a separate `payment_terms` table keyed directly by `supplier_id` (shared primary key, no generated id of its own), not inline columns on `suppliers` — `Supplier`'s own Story 3.1 Javadoc already committed to payment terms being a separate entity, same as prices/SKUs and discount tiers.
 - Mutation (`PUT`) is `ADMIN`/`PURCHASING`-only; `GET` is open to any authenticated role — same role split as Suppliers.
 - Tenancy: the supplier must belong to the caller's company; a cross-tenant supplier id (or a nonexistent one) returns `404`/`NOT_FOUND` on both `PUT` and `GET`.
@@ -126,11 +126,12 @@ Accessing another company's data returns the same `404`/`NOT_FOUND` as a genuine
 
 To split an order total by a supplier's terms: `deposit = round(total × depositPercentage / 100)` at `Money`'s standard scale-2/**HALF_EVEN** rounding (via `Money.multiply`, not a separate rounding rule — see Money below), then `balance = total − deposit` (via the new `Money.minus`), **not independently rounded**. This guarantees `deposit + balance` always equals the total exactly, with any odd remainder falling on the balance rather than the deposit. Implemented as `PaymentTerms#split(Money total)`; not wired to any endpoint yet — Feature 7 is the first real caller.
 
-**Decisions made on recommended defaults, pending Product Owner confirmation:**
-- **Deposit precision:** stored as a decimal supporting fractional percentages (e.g. `33.5%`), not integer-only. Costs nothing now; tightens to whole-number-only via validation, no migration, if the PO says otherwise.
+**Deposit precision — confirmed (Consolidation ticket):** fractional percentages are allowed, capped at 1 decimal place (`33.5%` valid, `33.55%` rejected). Storage already supported arbitrary decimals; the cap is enforced as a validation rule on write, no migration needed.
+
+**Decision made on a recommended default, pending Product Owner confirmation:**
 - **Remainder placement:** the balance absorbs the odd penny, not the deposit (deposit stays a clean rounded figure). One-line change (which side is derived) if the PO wants it the other way.
 
-Both are isolated, low-cost-to-reverse choices confined to `PaymentTerms#split`.
+An isolated, low-cost-to-reverse choice confined to `PaymentTerms#split`.
 
 ---
 
@@ -145,8 +146,9 @@ Both are isolated, low-cost-to-reverse choices confined to `PaymentTerms#split`.
 - **Implementation:** `com.shvoy.Money` (record: `amount` + `currency`) is the monetary type for currency-minor-unit amounts (totals, deposits, balances) — every such field should be a `Money`, not a raw `BigDecimal`. Its compact constructor enforces scale-2/`HALF_EVEN` on construction, including on every result of `plus`/`minus`/`multiply`, so the rounding-step rule above is structural rather than a convention each call site has to remember. Wire (de)serialisation to/from the string format is built in (`AmountSerializer`/`AmountDeserializer`, shared with `UnitPrice` below) — no per-field `@JsonFormat` needed anywhere `Money`/`UnitPrice` is used.
 - **`com.shvoy.UnitPrice` — the sibling type for per-unit prices (added Story 3.4):** same record shape, wire format, and `HALF_EVEN` rounding as `Money`, but fixed at **scale 4** instead of 2. Procurement unit prices routinely carry 4 decimal places (e.g. `1.4275`); rounding a unit price down to 2dp before multiplying by a large order quantity would compound into a real total-price error, so it's a distinct type rather than `Money` used at a different scale. `Money` stays fixed at 2dp everywhere it's used — nothing about this introduces a variable-scale `Money`.
 
-**Still open, deferred to Feature 3 (no monetary fields existed in the codebase when Cleanup Story 4 was written, so these didn't have a concrete case to resolve against — SKU unit prices, added Story 3.4, are the first, but the questions below are about `Money`/totals, not `UnitPrice`):**
-- **Currency scope** — is SHVOY single-currency (e.g. USD only) for the pilot, or does multi-currency need to actually work? `Money`/`UnitPrice` carry a currency code either way (validated as a real ISO 4217 code), but no conversion logic exists, and none is planned until this is answered.
+**Currency scope — settled (Consolidation ticket, per Roadmap v2):** SHVOY's MVP is explicitly single-currency, **USD**. `Money`/`UnitPrice` still carry a currency code on every value (validated as a real ISO 4217 code) rather than assuming USD implicitly — no conversion logic exists, and multi-currency (see the Phase 2 section below) is deliberately out of scope for MVP. Every example/fixture in this doc and the test suite uses `USD` accordingly; a non-USD currency code is still technically accepted by `Money`/`UnitPrice`'s own validation (it only checks "is this a real ISO 4217 code", not "is this USD"), but nothing in the product assumes any currency other than USD is actually in play yet.
+
+**Still open, deferred to Feature 3:**
 - **The ±2% tolerance boundary** — the PO/price-reconciliation matching rule that motivated this story in the first place. Needs to be spelled out concretely (which comparison, which fields) once Feature 3's price-resolution service (3.8) exists, and a boundary test written against that actual rule — `MoneyTest` currently proves the rounding policy in isolation (see `roundsEachLineThenSumsRatherThanSummingRawAndRoundingOnce`), not that specific business rule.
 
 ---
@@ -268,7 +270,7 @@ Two `SkuPrice` rows matching the same `asOfDate` should never happen given 3.5's
 
 ### Explicitly out of scope here
 
-Multi-currency conversion/comparison (the resolved price simply carries its `SkuPrice`'s currency; comparing/converting across currencies is a flagged Product Owner decision that belongs to Feature 5's reconciliation scope — see Money above). The Screen 3 "blocks submit until overridden" UI behavior and any PO logic (Feature 4 — this service only supplies the `priceFound`/carton signals that behavior reads). Any price mutation (this service never writes).
+Multi-currency conversion/comparison (the resolved price simply carries its `SkuPrice`'s currency; MVP is single-currency USD — see Money above — and cross-currency handling belongs to Feature 5's reconciliation scope, now documented in the Feature 5 section below). The Screen 3 "blocks submit until overridden" UI behavior and any PO logic (Feature 4 — this service only supplies the `priceFound`/carton signals that behavior reads). Any price mutation (this service never writes).
 
 ---
 
@@ -297,7 +299,7 @@ A PO line stores the price it was created with — `unit_price_amount` (4dp), `c
 
 **Re-resolving at generation:** a PO drafted today but generated/sent days later should reflect the price valid when it's actually finalised, not the stale draft-time price — so 4.6 re-resolves and re-snapshots at generation time. This story's resolution is the working-draft preview in between, not the final locked price.
 
-**Validation, mostly enforced by reuse rather than new checks:** quantity must be positive (`VALIDATION_ERROR`) — checked explicitly here even though `PriceResolutionService` already checks it too, deliberate defense-in-depth for a caller that might reach this service some other way. A SKU that doesn't belong to the PO's supplier surfaces as `NOT_FOUND` **for free**, via `PriceResolutionService`'s own ownership chain — not reimplemented in this service. **New in this story:** a single-currency-per-PO rule — a line that resolves to a different currency than the PO's other already-priced lines is rejected (`CURRENCY_MISMATCH`/409). A clean, defensible constraint for PO creation (sidesteps the harder multi-currency question, which belongs to Feature 5 reconciliation — see Money above), but flagged as a real decision pending confirmation it fits how SHVOY's suppliers actually quote.
+**Validation, mostly enforced by reuse rather than new checks:** quantity must be positive (`VALIDATION_ERROR`) — checked explicitly here even though `PriceResolutionService` already checks it too, deliberate defense-in-depth for a caller that might reach this service some other way. A SKU that doesn't belong to the PO's supplier surfaces as `NOT_FOUND` **for free**, via `PriceResolutionService`'s own ownership chain — not reimplemented in this service. **New in this story:** a single-currency-per-PO rule — a line that resolves to a different currency than the PO's other already-priced lines is rejected (`CURRENCY_MISMATCH`/409). Originally flagged as a decision pending confirmation it fits how SHVOY's suppliers actually quote; now grounded rather than assumed — Roadmap v2 confirms MVP is single-currency USD (see Money above), so this rule matches the real constraint, not just a simplifying guess. The harder multi-currency question (a PI arriving in a different currency than its PO) still belongs to Feature 5 reconciliation — see that section below.
 
 ### Totals & money composition (Story 4.3)
 
@@ -340,6 +342,37 @@ Every mutating endpoint returns the **full** `PurchaseOrderResponse` (status, ET
 
 ---
 
+## Feature 5 — PI reconciliation (forward notes, not yet built)
+
+**Status:** nothing in this section is built. Feature 5 hasn't started — these are decisions the Product Owner has already confirmed, recorded now (Consolidation ticket) so they aren't lost before the feature is actually scoped and built. Treat this section the same as the Phase 2 section below: a landing place for settled decisions about future work, not a spec for current behaviour.
+
+**Multi-currency PI — reject-and-route, not a hard validation error.** When a supplier's PI (invoice) arrives in a different currency than its PO, Feature 5 must **not** treat this as a blunt `400`/`VALIDATION_ERROR` the way a malformed request would be. Instead, it routes to an approver as an exception — the same shape as an outside-tolerance amount mismatch (see the ±2% tolerance boundary, still open, under Money above), not a rejection of the PI itself. Explicitly: **this does not auto-convert** the PI's currency to the PO's — no FX conversion happens as part of this reject-and-route path. (Phase 2's FX-rate machinery, below, is a separate, later capability — routing-on-mismatch doesn't imply or depend on it.)
+
+**Variance stored on every match, not only routed-to-approval ones.** The Product Owner has asked for the variance percentage to be logged on **every** reconciliation match, including auto-confirmed passes within tolerance — not just the ones that get routed to an approver as an exception. This is for per-supplier drift trending over time (seeing a supplier's variance creeping up even while every individual match still passes). Cheap to build in from the start of Feature 5 (the variance is already computed to decide pass/fail; persisting it costs nothing extra), expensive to retrofit once historical matches exist without it recorded. When Feature 5's reconciliation record is modelled, this means the variance % field belongs on every record unconditionally, not only ones with a routed/exception status.
+
+**Still open** (not guessed at here, pending the Product Owner's reply): the ±2% tolerance boundary's exact comparison/fields (see Money above), and the variance calculation's basis (variance of what, against what).
+
+---
+
+## Phase 2 — Multi-currency FX (forward notes, not yet built)
+
+**Status:** nothing in this section is built or scheduled — Phase 2, not MVP. MVP is single-currency USD (see Money above). Recorded here verbatim from the Product Owner's answer (Consolidation ticket) so the detail isn't lost before Phase 2 is actually scoped.
+
+The Product Owner's description of the eventual multi-currency FX logic:
+
+- **Rate source:** HMRC's monthly customs exchange rate (not a live/spot rate).
+- **Publication timing:** HMRC publishes the rate for a given calendar month on the **penultimate Thursday** of the *preceding* month.
+- **Lookup rule:** a PI's date maps to a calendar month, and that month's published HMRC rate is the one used — a PI-date-to-calendar-month lookup, not a PI-date-to-nearest-rate lookup.
+- **Caching:** HMRC's rates are consumed as a CSV/XML cache (fetched and stored locally), not queried live per transaction.
+- **Contract-fixed-rate override:** a per-supplier/per-PO toggle to use a rate fixed in the supplier contract instead of the HMRC monthly rate — an override, not a replacement of the default mechanism.
+- **Audit trail:** the rate actually used is stored **per transaction** — not just the current/latest rate — so a historical transaction's conversion can always be reproduced/audited later, the same "snapshot, not live reference" principle already used for PO line pricing (see Purchase orders above).
+
+**Flagged as having eventual model implications, not just a computation detail:**
+- **"Store the rate used per transaction"** implies a real schema field (or table) once Phase 2 is scoped — not a derived/computed value, since the whole point is reproducing what was actually used historically even if HMRC's published rate for that month is later revised or the cache is rebuilt.
+- **The contract-fixed-rate toggle** is supplier/PO configuration that overrides a default, with the two co-existing — the same underlying shape as the roadmap's **dual-term suppliers** (current vs. target payment terms) and **future-dated pricing**. These three are plausibly "the same kind of thing" (supplier config that overrides a default, with a transition/override period) and worth modelling together once a real case lands, rather than each being bolted on separately. Deliberately not modelled yet — held pending the future-dated/dual-term Product Owner answer, per the Consolidation ticket's scope notes, so this gets designed once, correctly, rather than piecemeal.
+
+---
+
 ## Dates and timestamps
 
 **Owner:** Cleanup Story 5 (date field mapping & container-fill deadline timezone). Field-level mapping is now **settled** — Story 3.4 gave the rule its first concrete case (SKU price validity dates), so this is no longer a rule with nothing to point at. Only the container-fill deadline timezone remains open, parked until Feature 8.
@@ -379,3 +412,4 @@ Rule: business dates are `LocalDate` (serialises as `yyyy-MM-dd`), real points i
 - Feature 4, Story 4.2: added the Line pricing subsection — `PurchaseOrderLinePricingService` wires a line to 3.8 as of the current/draft date, snapshotting price/tier/carton/validity in one shot via `PurchaseOrderLine#applyPriceResolution`. Added `CURRENCY_MISMATCH`. Two things it inherits rather than reimplements: the pending carton-rounding-rule PO question (via 3.7's shared rule) and SKU/supplier ownership enforcement (via `PriceResolutionService`'s own check). One new decision it introduces, flagged for PO confirmation: single currency per PO.
 - Feature 4, Story 4.3: added the Totals & money composition subsection — the Money contract's rules run for real for the first time. Added `UnitPrice#multiply` (line total: round the raw 4dp x quantity product once, HALF_EVEN) and `PurchaseOrderTotalsService` (order total: sum of already-rounded line totals, never a rounded sum of unrounded values; deposit/balance split via `PaymentTerms#split`, amounts only — due dates stay Feature 7's). Wired into `PurchaseOrderLinePricingService` so totals never go stale after a line is (re)priced. Tests deliberately engineer fixtures where sum-of-rounded diverges from round-of-sum, and where HALF_EVEN diverges from HALF_UP, rather than relying on incidental numbers.
 - Feature 4, Story 4.4: added the Creation & draft management subsection — the first real PO endpoints (create/list/get, add/edit/remove line, set ETD, cancel), all wiring together 4.1/4.2/4.3 rather than introducing new domain logic. Added `PurchaseOrderStatus.CANCELLED` (draft-only soft-delete), `PO_NOT_EDITABLE` (the DRAFT-only mutation guard, centralised in `PurchaseOrderService#assertEditable`), and `CurrentUserContext` (mirrors `TenantContext` for "current user," first needed for `createdBy`; resolved the same way, including a new `X-Debug-User-Id` header in `local`/`test` with, deliberately, no fallback default). PO number assignment stays at creation time (pilot-scale default: abandoned drafts leave sequence gaps, an accepted cost) and a past requested ETD is rejected — both confirmed rather than left open. Settled the Dates and timestamps table's Requested ETD row.
+- Consolidation ticket (Roadmap v2 + PO answers, not tied to a single story): applied a batch of settled corrections before they could be forgotten. Added `AnchorEvent.EX_FACTORY` (Roadmap v2's fourth anchor option). Capped `PaymentTermsRequest#depositPercentage` at 1 decimal place via `@Digits(integer = 3, fraction = 1)` (33.5 valid, 33.55 rejected). Settled the Money section's Currency scope question — MVP is single-currency USD — and corrected every USD-assumed example/fixture across this doc and the test suite accordingly (previously an arbitrary mix, mostly GBP). Added the Feature 5 and Phase 2 sections to record decisions already confirmed by the Product Owner ahead of either feature actually being built: Feature 5's multi-currency-PI reject-and-route behaviour (not a hard validation error, and does not auto-convert) and its variance-stored-on-every-match requirement; Phase 2's HMRC monthly-rate FX logic in full, flagging the per-transaction rate storage and the contract-fixed-rate toggle as having eventual model implications (the toggle is plausibly the same underlying "supplier config overriding a default" shape as dual-term suppliers and future-dated pricing — deliberately held, to be modelled together once, not piecemeal). Dual-term suppliers and the freight/NCR Phase-1 scoping decision are explicitly out of scope here — genuine model/scoping decisions, not quick corrections.

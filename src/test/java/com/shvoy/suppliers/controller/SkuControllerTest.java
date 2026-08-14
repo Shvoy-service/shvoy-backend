@@ -85,7 +85,7 @@ class SkuControllerTest {
                 .header(TENANT_HEADER, companyA.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"code\":\"" + code + "\",\"description\":\"Widget\",\"unitPriceAmount\":1.4275,"
-                    + "\"currency\":\"GBP\",\"validFrom\":\"" + validFrom + "\",\"validTo\":" + validToJson + "}"))
+                    + "\"currency\":\"USD\",\"validFrom\":\"" + validFrom + "\",\"validTo\":" + validToJson + "}"))
             .andReturn();
         return UUID.fromString(JsonPath.read(result.getResponse().getContentAsString(), "$.sku.id"));
     }
@@ -108,12 +108,12 @@ class SkuControllerTest {
                 .header(TENANT_HEADER, companyA.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"code\":\"SKU-1\",\"description\":\"Widget\",\"unitPriceAmount\":1.4275,"
-                    + "\"currency\":\"GBP\",\"validFrom\":\"2026-01-01\"}"))
+                    + "\"currency\":\"USD\",\"validFrom\":\"2026-01-01\"}"))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.sku.code").value("SKU-1"))
             .andExpect(jsonPath("$.sku.status").value("ACTIVE"))
             .andExpect(jsonPath("$.currentPrice.unitPrice.amount").value("1.4275"))
-            .andExpect(jsonPath("$.currentPrice.unitPrice.currency").value("GBP"))
+            .andExpect(jsonPath("$.currentPrice.unitPrice.currency").value("USD"))
             .andExpect(jsonPath("$.currentPrice.validFrom").value("2026-01-01"))
             .andExpect(jsonPath("$.currentPrice.validTo").doesNotExist());
     }
@@ -124,7 +124,7 @@ class SkuControllerTest {
         mockMvc.perform(post("/api/suppliers/{id}/skus", supplierAId)
                 .header(TENANT_HEADER, companyA.toString())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"code\":\"\",\"unitPriceAmount\":1.4275,\"currency\":\"GBP\",\"validFrom\":\"2026-01-01\"}"))
+                .content("{\"code\":\"\",\"unitPriceAmount\":1.4275,\"currency\":\"USD\",\"validFrom\":\"2026-01-01\"}"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
@@ -135,7 +135,7 @@ class SkuControllerTest {
         mockMvc.perform(post("/api/suppliers/{id}/skus", supplierAId)
                 .header(TENANT_HEADER, companyA.toString())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"code\":\"SKU-1\",\"unitPriceAmount\":1.42753,\"currency\":\"GBP\","
+                .content("{\"code\":\"SKU-1\",\"unitPriceAmount\":1.42753,\"currency\":\"USD\","
                     + "\"validFrom\":\"2026-01-01\"}"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
@@ -161,7 +161,7 @@ class SkuControllerTest {
         mockMvc.perform(post("/api/suppliers/{id}/skus", supplierAId)
                 .header(TENANT_HEADER, companyA.toString())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"code\":\"sku-1\",\"unitPriceAmount\":1.4275,\"currency\":\"GBP\","
+                .content("{\"code\":\"sku-1\",\"unitPriceAmount\":1.4275,\"currency\":\"USD\","
                     + "\"validFrom\":\"2026-01-01\"}"))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.code").value("DUPLICATE_SKU"));
@@ -173,7 +173,7 @@ class SkuControllerTest {
         mockMvc.perform(post("/api/suppliers/{id}/skus", supplierBId)
                 .header(TENANT_HEADER, companyA.toString())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"code\":\"SKU-1\",\"unitPriceAmount\":1.4275,\"currency\":\"GBP\","
+                .content("{\"code\":\"SKU-1\",\"unitPriceAmount\":1.4275,\"currency\":\"USD\","
                     + "\"validFrom\":\"2026-01-01\"}"))
             .andExpect(status().isNotFound())
             .andExpect(jsonPath("$.code").value("NOT_FOUND"));
@@ -185,7 +185,7 @@ class SkuControllerTest {
         mockMvc.perform(post("/api/suppliers/{id}/skus", supplierAId)
                 .header(TENANT_HEADER, companyA.toString())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"code\":\"SKU-1\",\"unitPriceAmount\":1.4275,\"currency\":\"GBP\","
+                .content("{\"code\":\"SKU-1\",\"unitPriceAmount\":1.4275,\"currency\":\"USD\","
                     + "\"validFrom\":\"2026-01-01\"}"))
             .andExpect(status().isForbidden())
             .andExpect(jsonPath("$.code").value("FORBIDDEN"));
@@ -201,7 +201,7 @@ class SkuControllerTest {
         mockMvc.perform(post("/api/suppliers/{id}/skus/{skuId}/prices", supplierAId, skuId)
                 .header(TENANT_HEADER, companyA.toString())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"unitPriceAmount\":2.0000,\"currency\":\"GBP\",\"validFrom\":\"2026-03-01\"}"))
+                .content("{\"unitPriceAmount\":2.0000,\"currency\":\"USD\",\"validFrom\":\"2026-03-01\"}"))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.validFrom").value("2026-03-01"))
             .andExpect(jsonPath("$.validTo").doesNotExist());
@@ -222,7 +222,7 @@ class SkuControllerTest {
         mockMvc.perform(post("/api/suppliers/{id}/skus/{skuId}/prices", supplierAId, skuId)
                 .header(TENANT_HEADER, companyA.toString())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"unitPriceAmount\":2.0000,\"currency\":\"GBP\",\"validFrom\":\"2025-12-01\"}"))
+                .content("{\"unitPriceAmount\":2.0000,\"currency\":\"USD\",\"validFrom\":\"2025-12-01\"}"))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.code").value("AMBIGUOUS_PRICE_WINDOW"));
 
@@ -238,7 +238,7 @@ class SkuControllerTest {
         mockMvc.perform(post("/api/suppliers/{id}/skus/{skuId}/prices", supplierAId, skuId)
                 .header(TENANT_HEADER, companyA.toString())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"unitPriceAmount\":2.0000,\"currency\":\"GBP\",\"validFrom\":\"2026-01-01\"}"))
+                .content("{\"unitPriceAmount\":2.0000,\"currency\":\"USD\",\"validFrom\":\"2026-01-01\"}"))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.code").value("AMBIGUOUS_PRICE_WINDOW"));
     }
@@ -251,7 +251,7 @@ class SkuControllerTest {
         mockMvc.perform(post("/api/suppliers/{id}/skus/{skuId}/prices", supplierAId, skuId)
                 .header(TENANT_HEADER, companyA.toString())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"unitPriceAmount\":2.0000,\"currency\":\"GBP\",\"validFrom\":\"2026-02-01\"}"))
+                .content("{\"unitPriceAmount\":2.0000,\"currency\":\"USD\",\"validFrom\":\"2026-02-01\"}"))
             .andExpect(status().isCreated());
     }
 
@@ -263,7 +263,7 @@ class SkuControllerTest {
         mockMvc.perform(post("/api/suppliers/{id}/skus/{skuId}/prices", supplierAId, skuId)
                 .header(TENANT_HEADER, companyA.toString())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"unitPriceAmount\":2.0000,\"currency\":\"GBP\",\"validFrom\":\"2026-03-01\"}"))
+                .content("{\"unitPriceAmount\":2.0000,\"currency\":\"USD\",\"validFrom\":\"2026-03-01\"}"))
             .andExpect(status().isConflict())
             .andExpect(jsonPath("$.code").value("AMBIGUOUS_PRICE_WINDOW"));
     }
@@ -276,7 +276,7 @@ class SkuControllerTest {
         mockMvc.perform(post("/api/suppliers/{id}/skus/{skuId}/prices", supplierAId, skuId)
                 .header(TENANT_HEADER, companyB.toString())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"unitPriceAmount\":2.0000,\"currency\":\"GBP\",\"validFrom\":\"2026-03-01\"}"))
+                .content("{\"unitPriceAmount\":2.0000,\"currency\":\"USD\",\"validFrom\":\"2026-03-01\"}"))
             .andExpect(status().isNotFound())
             .andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
@@ -304,7 +304,7 @@ class SkuControllerTest {
                     supplierAId, skuId)
                 .header(TENANT_HEADER, companyA.toString())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"unitPriceAmount\":2.0000,\"currency\":\"GBP\",\"validFrom\":\"2026-03-01\"}"))
+                .content("{\"unitPriceAmount\":2.0000,\"currency\":\"USD\",\"validFrom\":\"2026-03-01\"}"))
             .andReturn().getResponse().getStatus();
 
         ExecutorService executor = Executors.newFixedThreadPool(attempts);

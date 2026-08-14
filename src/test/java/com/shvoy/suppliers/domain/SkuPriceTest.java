@@ -12,7 +12,7 @@ import com.shvoy.UnitPrice;
 
 class SkuPriceTest {
 
-    private final UnitPrice price = new UnitPrice(new BigDecimal("1.4275"), "GBP");
+    private final UnitPrice price = new UnitPrice(new BigDecimal("1.4275"), "USD");
 
     @Test
     void isInDateWhenTodayFallsWithinTheValidityWindow() {
