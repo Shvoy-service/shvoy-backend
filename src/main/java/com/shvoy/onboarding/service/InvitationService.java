@@ -6,14 +6,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.shvoy.ConflictException;
+import com.shvoy.EmailMessage;
+import com.shvoy.EmailSender;
 import com.shvoy.ErrorCode;
 import com.shvoy.NotFoundException;
 import com.shvoy.TenantContext;
@@ -37,19 +37,29 @@ import com.shvoy.onboarding.repository.UserRepository;
  * and ACTIVE users in *other* companies too (email is globally unique), and
  * Spring Data validates declared query methods against Hibernate at
  * repository-bean-creation time — before any tenant can possibly exist.
+ *
+ * The invite email is sent via {@link EmailSender} (Story 4.7 extracted this
+ * from what used to be a plain {@code log.info} call here, into a seam
+ * {@code PurchaseOrderSendService} now shares) — see that interface's
+ * Javadoc. {@code ConsoleEmailSender} is still the only implementation, so
+ * the effective behaviour (a link logged to the console) is unchanged; only
+ * which class does the logging changed — see {@code LogCapture} usages in
+ * this flow's tests, which capture {@code ConsoleEmailSender}, not this
+ * class, accordingly.
  */
 @Service
 public class InvitationService {
 
-    private static final Logger log = LoggerFactory.getLogger(InvitationService.class);
     private static final Duration INVITE_TOKEN_TTL = Duration.ofDays(7);
 
     private final UserRepository userRepository;
     private final JdbcTemplate jdbcTemplate;
+    private final EmailSender emailSender;
 
-    InvitationService(UserRepository userRepository, JdbcTemplate jdbcTemplate) {
+    InvitationService(UserRepository userRepository, JdbcTemplate jdbcTemplate, EmailSender emailSender) {
         this.userRepository = userRepository;
         this.jdbcTemplate = jdbcTemplate;
+        this.emailSender = emailSender;
     }
 
     @Transactional
@@ -86,9 +96,11 @@ public class InvitationService {
             }
         }
 
-        // Email delivery is a separate (notifications) feature — logged for
-        // now so the flow is testable end to end without it.
-        log.info("Invite link for {}: /api/onboarding/activate?token={}", request.email(), rawToken);
+        // Real email delivery is a separate (Notifications) feature — see
+        // EmailSender's Javadoc. ConsoleEmailSender logs this for now so the
+        // flow is testable end to end without it.
+        emailSender.send(new EmailMessage(request.email(), "You've been invited to SHVOY",
+            "Invite link for " + request.email() + ": /api/onboarding/activate?token=" + rawToken));
 
         return new InviteResponse(user.getEmail(), user.getRole(), user.getStatus());
     }

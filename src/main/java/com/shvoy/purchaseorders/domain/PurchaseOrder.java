@@ -181,6 +181,25 @@ public class PurchaseOrder extends TenantScoped {
         this.updatedAt = Instant.now();
     }
 
+    /**
+     * Story 4.7's {@code GENERATED} → {@code SENT} transition — idempotent
+     * by design rather than a status check the caller has to duplicate: a
+     * first send moves the status, a resend (recommendation this story
+     * confirmed: allowed, since "please resend the PO" is a normal real-
+     * world request) finds the PO already {@code SENT} and this is a no-op
+     * on the status itself. Either way, {@code PurchaseOrderSendService}
+     * appends its own {@code PurchaseOrderSend} audit row separately —
+     * every send, first or repeat, gets one. Never re-prices or re-
+     * generates: the document a resend dispatches is the same one 4.6
+     * already produced and locked.
+     */
+    public void markSent() {
+        if (status == PurchaseOrderStatus.GENERATED) {
+            this.status = PurchaseOrderStatus.SENT;
+            this.updatedAt = Instant.now();
+        }
+    }
+
     public UUID getId() {
         return id;
     }

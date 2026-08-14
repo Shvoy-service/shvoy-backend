@@ -28,13 +28,14 @@ import com.shvoy.purchaseorders.dto.PurchaseOrderResponse;
 import com.shvoy.purchaseorders.dto.UpdateRequestedEtdRequest;
 import com.shvoy.purchaseorders.service.PurchaseOrderGenerationService;
 import com.shvoy.purchaseorders.service.PurchaseOrderLineService;
+import com.shvoy.purchaseorders.service.PurchaseOrderSendService;
 import com.shvoy.purchaseorders.service.PurchaseOrderService;
 
 /**
- * Stories 4.4/4.6 — draft PO creation/editing plus finalisation/document
- * retrieval. Reads are open to any authenticated company user; every
- * mutation (including generation) is restricted to ADMIN/PURCHASING and
- * DRAFT-only (enforced in the service layer via {@code PO_NOT_EDITABLE}).
+ * Stories 4.4/4.6/4.7 — draft PO creation/editing plus finalisation/document
+ * retrieval/sending. Reads are open to any authenticated company user;
+ * every mutation (including generation and sending) is restricted to
+ * ADMIN/PURCHASING.
  *
  * No {@code {companyId}} path segment — same reasoning as SupplierController:
  * the caller's company always comes from TenantContext, never the URL.
@@ -46,12 +47,14 @@ class PurchaseOrderController {
     private final PurchaseOrderService purchaseOrderService;
     private final PurchaseOrderLineService purchaseOrderLineService;
     private final PurchaseOrderGenerationService purchaseOrderGenerationService;
+    private final PurchaseOrderSendService purchaseOrderSendService;
 
     PurchaseOrderController(PurchaseOrderService purchaseOrderService, PurchaseOrderLineService purchaseOrderLineService,
-            PurchaseOrderGenerationService purchaseOrderGenerationService) {
+            PurchaseOrderGenerationService purchaseOrderGenerationService, PurchaseOrderSendService purchaseOrderSendService) {
         this.purchaseOrderService = purchaseOrderService;
         this.purchaseOrderLineService = purchaseOrderLineService;
         this.purchaseOrderGenerationService = purchaseOrderGenerationService;
+        this.purchaseOrderSendService = purchaseOrderSendService;
     }
 
     @PostMapping
@@ -123,5 +126,17 @@ class PurchaseOrderController {
             .contentType(MediaType.APPLICATION_PDF)
             .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"purchase-order.pdf\"")
             .body(pdf);
+    }
+
+    /**
+     * Story 4.7. Requires {@code GENERATED} or {@code SENT} status — a
+     * resend is allowed (see {@code PurchaseOrderSendService}'s Javadoc for
+     * why), so this endpoint doesn't distinguish first send from resend at
+     * the HTTP layer; every call just sends.
+     */
+    @PostMapping("/{id}/send")
+    @PreAuthorize("hasAnyRole('ADMIN', 'PURCHASING')")
+    PurchaseOrderResponse send(@PathVariable UUID id) {
+        return purchaseOrderSendService.send(id);
     }
 }
