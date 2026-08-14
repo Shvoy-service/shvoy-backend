@@ -23,6 +23,7 @@ import com.shvoy.reconciliation.domain.ApprovalActionType;
 import com.shvoy.reconciliation.domain.ProformaInvoice;
 import com.shvoy.reconciliation.domain.ProformaInvoiceStatus;
 import com.shvoy.reconciliation.domain.Reconciliation;
+import com.shvoy.reconciliation.domain.ReconciliationAuditEventType;
 import com.shvoy.reconciliation.domain.ReconciliationFindingType;
 import com.shvoy.reconciliation.domain.ReconciliationLine;
 import com.shvoy.reconciliation.dto.ApprovalActionResponse;
@@ -58,6 +59,7 @@ public class PiApprovalService {
     private final ApprovalActionRepository approvalActionRepository;
     private final ApproverPoolService approverPoolService;
     private final PurchaseOrderService purchaseOrderService;
+    private final ReconciliationAuditService reconciliationAuditService;
 
     PiApprovalService(
             ProformaInvoiceRepository proformaInvoiceRepository,
@@ -65,13 +67,15 @@ public class PiApprovalService {
             ReconciliationLineRepository reconciliationLineRepository,
             ApprovalActionRepository approvalActionRepository,
             ApproverPoolService approverPoolService,
-            PurchaseOrderService purchaseOrderService) {
+            PurchaseOrderService purchaseOrderService,
+            ReconciliationAuditService reconciliationAuditService) {
         this.proformaInvoiceRepository = proformaInvoiceRepository;
         this.reconciliationRepository = reconciliationRepository;
         this.reconciliationLineRepository = reconciliationLineRepository;
         this.approvalActionRepository = approvalActionRepository;
         this.approverPoolService = approverPoolService;
         this.purchaseOrderService = purchaseOrderService;
+        this.reconciliationAuditService = reconciliationAuditService;
     }
 
     /**
@@ -103,10 +107,14 @@ public class PiApprovalService {
         approvalActionRepository.save(new ApprovalAction(
             proformaInvoiceId, reconciliation.getId(), ApprovalActionType.APPROVE, actor, comment));
 
-        if (!requiresSignOff || distinctApprovers(proformaInvoiceId).size() >= requiredApprovals(true)) {
+        boolean confirmed = !requiresSignOff || distinctApprovers(proformaInvoiceId).size() >= requiredApprovals(true);
+        if (confirmed) {
             pi.markApproved();
             proformaInvoiceRepository.save(pi);
         }
+        reconciliationAuditService.record(proformaInvoiceId, reconciliation.getId(),
+            confirmed ? ReconciliationAuditEventType.APPROVED : ReconciliationAuditEventType.APPROVAL_RECORDED,
+            actor, comment);
         return buildState(pi, reconciliation);
     }
 
@@ -127,6 +135,8 @@ public class PiApprovalService {
             proformaInvoiceId, reconciliation.getId(), ApprovalActionType.REJECT, actor, reason));
         pi.markRejected();
         proformaInvoiceRepository.save(pi);
+        reconciliationAuditService.record(proformaInvoiceId, reconciliation.getId(),
+            ReconciliationAuditEventType.REJECTED, actor, reason);
         return buildState(pi, reconciliation);
     }
 

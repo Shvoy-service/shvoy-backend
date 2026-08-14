@@ -69,6 +69,7 @@ class ToleranceEvaluationControllerTest {
 
     @AfterEach
     void cleanUp() {
+        jdbcTemplate.update("DELETE FROM reconciliation_audit_events WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM reconciliation_lines WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM reconciliations WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM tolerance_settings WHERE company_id = ?", companyA);

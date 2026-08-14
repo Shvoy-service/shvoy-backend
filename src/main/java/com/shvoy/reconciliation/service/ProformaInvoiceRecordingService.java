@@ -13,6 +13,7 @@ import com.shvoy.ValidationException;
 import com.shvoy.purchaseorders.service.PurchaseOrderService;
 import com.shvoy.reconciliation.domain.ProformaInvoice;
 import com.shvoy.reconciliation.domain.ProformaInvoiceLine;
+import com.shvoy.reconciliation.domain.ReconciliationAuditEventType;
 import com.shvoy.reconciliation.dto.LogProformaInvoiceRequest;
 import com.shvoy.reconciliation.dto.ProformaInvoiceLineRequest;
 import com.shvoy.reconciliation.repository.ProformaInvoiceLineRepository;
@@ -49,16 +50,19 @@ class ProformaInvoiceRecordingService {
     private final ProformaInvoiceLineRepository proformaInvoiceLineRepository;
     private final PurchaseOrderService purchaseOrderService;
     private final SkuService skuService;
+    private final ReconciliationAuditService reconciliationAuditService;
 
     ProformaInvoiceRecordingService(
             ProformaInvoiceRepository proformaInvoiceRepository,
             ProformaInvoiceLineRepository proformaInvoiceLineRepository,
             PurchaseOrderService purchaseOrderService,
-            SkuService skuService) {
+            SkuService skuService,
+            ReconciliationAuditService reconciliationAuditService) {
         this.proformaInvoiceRepository = proformaInvoiceRepository;
         this.proformaInvoiceLineRepository = proformaInvoiceLineRepository;
         this.purchaseOrderService = purchaseOrderService;
         this.skuService = skuService;
+        this.reconciliationAuditService = reconciliationAuditService;
     }
 
     @Transactional
@@ -69,8 +73,9 @@ class ProformaInvoiceRecordingService {
 
         supersedeCurrentActivePi(purchaseOrderId);
 
+        UUID loggedBy = CurrentUserContext.get();
         ProformaInvoice proformaInvoice = proformaInvoiceRepository.save(
-            new ProformaInvoice(purchaseOrderId, request.piReference(), currency, CurrentUserContext.get()));
+            new ProformaInvoice(purchaseOrderId, request.piReference(), currency, loggedBy));
 
         List<ProformaInvoiceLine> lines = new ArrayList<>();
         int lineNumber = 1;
@@ -79,6 +84,10 @@ class ProformaInvoiceRecordingService {
                 lineRequest.confirmedUnitPriceAmount(), lineRequest.confirmedQuantity()));
         }
         proformaInvoiceLineRepository.saveAll(lines);
+
+        reconciliationAuditService.record(proformaInvoice.getId(), null,
+            ReconciliationAuditEventType.PI_LOGGED, loggedBy,
+            "Logged PI " + request.piReference() + " (" + currency + ") with " + lines.size() + " line(s)");
 
         return proformaInvoice.getId();
     }
@@ -98,6 +107,9 @@ class ProformaInvoiceRecordingService {
             .forEach(pi -> {
                 pi.supersede();
                 proformaInvoiceRepository.save(pi);
+                reconciliationAuditService.record(pi.getId(), null,
+                    ReconciliationAuditEventType.SUPERSEDED, null,
+                    "Superseded by a corrected PI logged against the same PO");
             });
     }
 

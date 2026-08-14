@@ -12,6 +12,8 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import com.shvoy.ConflictException;
+import com.shvoy.ErrorCode;
 import com.shvoy.TenantScoped;
 
 /**
@@ -95,8 +97,8 @@ public class ProformaInvoice extends TenantScoped {
      * active for the PO, immediately before the new one is saved as active.
      */
     public void supersede() {
+        transitionTo(ProformaInvoiceStatus.SUPERSEDED);
         this.active = false;
-        this.updatedAt = Instant.now();
     }
 
     /**
@@ -104,36 +106,44 @@ public class ProformaInvoice extends TenantScoped {
      * outcome onto the PI's own lifecycle status. Auto-confirm is a
      * <strong>system</strong> action (no user), so there's no actor argument;
      * the audit of what/when/against-what-variance lives on the {@code
-     * Reconciliation} record. The full lifecycle guarding (which transitions
-     * are legal from which state) is 5.7's; here the PI is freshly {@code
-     * LOGGED} and this runs once, right after the comparison.
+     * Reconciliation} record and the audit trail (5.7).
      */
     public void markAutoConfirmed() {
-        this.status = ProformaInvoiceStatus.AUTO_CONFIRMED;
-        this.updatedAt = Instant.now();
+        transitionTo(ProformaInvoiceStatus.AUTO_CONFIRMED);
     }
 
     /** Story 5.4 — routed to approval; the approval mechanics (who, the 2-of-N gate) are 5.5/5.6. */
     public void markRoutedForApproval() {
-        this.status = ProformaInvoiceStatus.ROUTED_FOR_APPROVAL;
-        this.updatedAt = Instant.now();
+        transitionTo(ProformaInvoiceStatus.ROUTED_FOR_APPROVAL);
     }
 
     /**
      * Story 5.5 — a routed PI cleared its approval requirement (a single
      * approver on the non-increase path, or the Nth distinct pool sign-off on
      * a price increase). The immutable {@code ApprovalAction} rows are the
-     * audit of who/when/why; this only moves the lifecycle status. Full
-     * transition guarding is 5.7's.
+     * audit of who/when/why; this only moves the lifecycle status.
      */
     public void markApproved() {
-        this.status = ProformaInvoiceStatus.APPROVED;
-        this.updatedAt = Instant.now();
+        transitionTo(ProformaInvoiceStatus.APPROVED);
     }
 
     /** Story 5.5 — a single rejection is enough to reject a routed PI; the rejecting {@code ApprovalAction} records who/when/why. */
     public void markRejected() {
-        this.status = ProformaInvoiceStatus.REJECTED;
+        transitionTo(ProformaInvoiceStatus.REJECTED);
+    }
+
+    /**
+     * Story 5.7 — the one place a PI's status changes, guarded by {@link
+     * ProformaInvoiceStatus#canTransitionTo}. An illegal transition throws
+     * {@code INVALID_STATUS_TRANSITION} rather than corrupting state — so no
+     * caller can, say, move a {@code REJECTED} PI to {@code APPROVED}.
+     */
+    private void transitionTo(ProformaInvoiceStatus target) {
+        if (!status.canTransitionTo(target)) {
+            throw new ConflictException(ErrorCode.INVALID_STATUS_TRANSITION,
+                "Illegal reconciliation status transition: " + status + " → " + target);
+        }
+        this.status = target;
         this.updatedAt = Instant.now();
     }
 

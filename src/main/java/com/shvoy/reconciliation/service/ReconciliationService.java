@@ -23,6 +23,7 @@ import com.shvoy.purchaseorders.dto.PurchaseOrderReconciliationLine;
 import com.shvoy.purchaseorders.dto.PurchaseOrderReconciliationView;
 import com.shvoy.purchaseorders.service.PurchaseOrderService;
 import com.shvoy.reconciliation.domain.ProformaInvoice;
+import com.shvoy.reconciliation.domain.ReconciliationAuditEventType;
 import com.shvoy.reconciliation.domain.ProformaInvoiceLine;
 import com.shvoy.reconciliation.domain.Reconciliation;
 import com.shvoy.reconciliation.domain.ReconciliationFindingType;
@@ -67,6 +68,7 @@ public class ReconciliationService {
     private final ReconciliationLineRepository reconciliationLineRepository;
     private final PurchaseOrderService purchaseOrderService;
     private final PriceResolutionService priceResolutionService;
+    private final ReconciliationAuditService reconciliationAuditService;
 
     ReconciliationService(
             ProformaInvoiceRepository proformaInvoiceRepository,
@@ -74,13 +76,15 @@ public class ReconciliationService {
             ReconciliationRepository reconciliationRepository,
             ReconciliationLineRepository reconciliationLineRepository,
             PurchaseOrderService purchaseOrderService,
-            PriceResolutionService priceResolutionService) {
+            PriceResolutionService priceResolutionService,
+            ReconciliationAuditService reconciliationAuditService) {
         this.proformaInvoiceRepository = proformaInvoiceRepository;
         this.proformaInvoiceLineRepository = proformaInvoiceLineRepository;
         this.reconciliationRepository = reconciliationRepository;
         this.reconciliationLineRepository = reconciliationLineRepository;
         this.purchaseOrderService = purchaseOrderService;
         this.priceResolutionService = priceResolutionService;
+        this.reconciliationAuditService = reconciliationAuditService;
     }
 
     @Transactional
@@ -94,7 +98,7 @@ public class ReconciliationService {
         boolean currencyMismatch = poCurrency != null && !poCurrency.equals(piCurrency);
 
         Reconciliation reconciliation = reconciliationRepository.save(new Reconciliation(
-            proformaInvoice.getId(), po.purchaseOrderId(), VarianceCalculator.BASIS,
+            proformaInvoice.getId(), po.purchaseOrderId(), po.supplierId(), VarianceCalculator.BASIS,
             po.generationDate(), poCurrency, piCurrency, currencyMismatch));
 
         List<ProformaInvoiceLine> piLines = proformaInvoiceLineRepository.findAll().stream()
@@ -104,6 +108,11 @@ public class ReconciliationService {
         List<ReconciliationLine> findings =
             correlate(reconciliation.getId(), po, piLines, currencyMismatch);
         reconciliationLineRepository.saveAll(findings);
+
+        reconciliationAuditService.record(proformaInvoice.getId(), reconciliation.getId(),
+            ReconciliationAuditEventType.COMPARISON_RECORDED, null,
+            "Compared " + findings.size() + " line(s) as of " + po.generationDate()
+                + (currencyMismatch ? "; currency mismatch (" + poCurrency + " vs " + piCurrency + ")" : ""));
 
         return reconciliation.getId();
     }

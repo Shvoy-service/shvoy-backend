@@ -68,6 +68,7 @@ class PiApprovalControllerTest {
 
     @AfterEach
     void cleanUp() {
+        jdbcTemplate.update("DELETE FROM reconciliation_audit_events WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM approval_actions WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM reconciliation_lines WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM reconciliations WHERE company_id IN (?, ?)", companyA, companyB);
