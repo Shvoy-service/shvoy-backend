@@ -37,6 +37,16 @@ import com.shvoy.UnitPrice;
  * applied (no tier, or the quantity fell below the lowest threshold) —
  * distinguishing "a tier was applied" from "the base price applied" is
  * exactly what Screen 3's "discount tier applied" indicator needs.
+ *
+ * {@code everPriced} (added Story 4.5) distinguishes, when
+ * {@code priceFound} is {@code false}, *why*: {@code true} means the SKU
+ * has at least one {@code SkuPrice} row somewhere in its history — a price
+ * that has **expired** (or, once future-dated prices are supported, not
+ * yet started) — versus {@code false}, meaning the SKU has **never** had a
+ * price at all, nothing to fall back on. Irrelevant (always {@code true})
+ * when {@code priceFound} is {@code true}. Story 4.5's override flow needs
+ * this distinction: an "expired" line has a last-known value that could be
+ * shown/reused; a "never priced" line has nothing.
  */
 @NamedInterface("price-resolution")
 public record PriceResolutionResult(
@@ -46,6 +56,7 @@ public record PriceResolutionResult(
     Integer appliedTierThreshold,
     LocalDate asOfDate,
     boolean cartonValid,
-    int adjustedQuantity
+    int adjustedQuantity,
+    boolean everPriced
 ) {
 }

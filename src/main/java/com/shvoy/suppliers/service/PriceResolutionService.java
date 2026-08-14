@@ -74,9 +74,14 @@ public class PriceResolutionService {
         boolean cartonValid = sku.isCartonMultiple(quantity);
         int adjustedQuantity = sku.nearestCartonMultiple(quantity);
 
-        Optional<SkuPrice> resolvedPrice = resolveApplicablePrice(skuId, asOfDate);
+        List<SkuPrice> allPricesForSku = skuPriceRepository.findAll().stream()
+            .filter(p -> p.getSkuId().equals(skuId))
+            .toList();
+        boolean everPriced = !allPricesForSku.isEmpty();
+
+        Optional<SkuPrice> resolvedPrice = resolveApplicablePrice(skuId, allPricesForSku, asOfDate);
         if (resolvedPrice.isEmpty()) {
-            return new PriceResolutionResult(false, null, null, null, asOfDate, cartonValid, adjustedQuantity);
+            return new PriceResolutionResult(false, null, null, null, asOfDate, cartonValid, adjustedQuantity, everPriced);
         }
 
         SkuPrice price = resolvedPrice.get();
@@ -87,7 +92,7 @@ public class PriceResolutionService {
         Integer appliedTierThreshold = appliedTier.map(DiscountTier::getQuantityThreshold).orElse(null);
 
         return new PriceResolutionResult(true, price.getId(), unitPrice, appliedTierThreshold, asOfDate,
-            cartonValid, adjustedQuantity);
+            cartonValid, adjustedQuantity, true);
     }
 
     /**
@@ -99,9 +104,8 @@ public class PriceResolutionService {
      * and logs it as a data-integrity signal, since more than one match
      * means something upstream is broken, not a case to silently paper over.
      */
-    private Optional<SkuPrice> resolveApplicablePrice(UUID skuId, LocalDate asOfDate) {
-        List<SkuPrice> candidates = skuPriceRepository.findAll().stream()
-            .filter(p -> p.getSkuId().equals(skuId))
+    private Optional<SkuPrice> resolveApplicablePrice(UUID skuId, List<SkuPrice> allPricesForSku, LocalDate asOfDate) {
+        List<SkuPrice> candidates = allPricesForSku.stream()
             .filter(p -> p.isInDate(asOfDate))
             .toList();
         if (candidates.size() > 1) {
