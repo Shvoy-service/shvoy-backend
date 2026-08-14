@@ -1,12 +1,16 @@
 package com.shvoy.suppliers.service;
 
+import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.modulith.NamedInterface;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.shvoy.Money;
 import com.shvoy.NotFoundException;
 import com.shvoy.TenantGuard;
+import com.shvoy.suppliers.domain.PaymentSplit;
 import com.shvoy.suppliers.domain.PaymentTerms;
 import com.shvoy.suppliers.domain.Supplier;
 import com.shvoy.suppliers.dto.PaymentTermsRequest;
@@ -18,7 +22,14 @@ import com.shvoy.suppliers.repository.SupplierRepository;
  * Plain {@code @Transactional}, same reasoning as SupplierService: every
  * method here runs against a tenant already established by
  * TenantContextFilter before the controller is invoked.
+ *
+ * {@link #trySplit} is this class's cross-module surface (Story 4.3) —
+ * {@code @NamedInterface}, same pattern as {@code PriceResolutionService}
+ * (3.8), so another module can get a supplier's deposit/balance split
+ * without reaching into {@link PaymentTermsRepository}/{@link PaymentTerms}
+ * directly, which stay internal to this module.
  */
+@NamedInterface("payment-terms")
 @Service
 public class PaymentTermsService {
 
@@ -54,6 +65,20 @@ public class PaymentTermsService {
         PaymentTerms terms = paymentTermsRepository.findById(supplierId)
             .orElseThrow(() -> new NotFoundException("Payment terms not set for this supplier"));
         return toResponse(terms);
+    }
+
+    /**
+     * The supplier's deposit/balance split of {@code total}, or empty if
+     * the supplier has no payment terms configured — never a default
+     * split, since guessing a deposit percentage nobody agreed to would be
+     * worse than reporting nothing. Tenant-scoping comes from
+     * {@code paymentTermsRepository}'s own {@code TenantScoped} filtering,
+     * same as everywhere else — no separate ownership check needed since
+     * this never crosses from one company's supplier to another's terms.
+     */
+    @Transactional(readOnly = true)
+    public Optional<PaymentSplit> trySplit(UUID supplierId, Money total) {
+        return paymentTermsRepository.findById(supplierId).map(terms -> terms.split(total));
     }
 
     private void findOwnSupplier(UUID id) {

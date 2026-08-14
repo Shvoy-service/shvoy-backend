@@ -27,6 +27,11 @@ import com.shvoy.suppliers.service.PriceResolutionService;
  * now wants the price valid today. 4.6 (generation) re-resolves and
  * re-snapshots at that later point; this story only prices the working
  * draft, it doesn't hold generation-time semantics.
+ *
+ * Also triggers {@link PurchaseOrderTotalsService#recompute} after every
+ * (re)price (Story 4.3) — a line's total changing is exactly the kind of
+ * line mutation the PO's stored order total/deposit/balance must never go
+ * stale relative to.
  */
 @Service
 public class PurchaseOrderLinePricingService {
@@ -34,13 +39,16 @@ public class PurchaseOrderLinePricingService {
     private final PurchaseOrderRepository purchaseOrderRepository;
     private final PurchaseOrderLineRepository purchaseOrderLineRepository;
     private final PriceResolutionService priceResolutionService;
+    private final PurchaseOrderTotalsService purchaseOrderTotalsService;
 
     PurchaseOrderLinePricingService(PurchaseOrderRepository purchaseOrderRepository,
             PurchaseOrderLineRepository purchaseOrderLineRepository,
-            PriceResolutionService priceResolutionService) {
+            PriceResolutionService priceResolutionService,
+            PurchaseOrderTotalsService purchaseOrderTotalsService) {
         this.purchaseOrderRepository = purchaseOrderRepository;
         this.purchaseOrderLineRepository = purchaseOrderLineRepository;
         this.priceResolutionService = priceResolutionService;
+        this.purchaseOrderTotalsService = purchaseOrderTotalsService;
     }
 
     /**
@@ -70,7 +78,11 @@ public class PurchaseOrderLinePricingService {
         }
 
         line.applyPriceResolution(result);
-        return purchaseOrderLineRepository.save(line);
+        PurchaseOrderLine saved = purchaseOrderLineRepository.save(line);
+        // 4.3: a re-priced line's total has changed, so the PO's stored
+        // order total/deposit/balance must never go stale relative to it.
+        purchaseOrderTotalsService.recompute(saved.getPurchaseOrderId());
+        return saved;
     }
 
     /**

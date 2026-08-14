@@ -22,8 +22,10 @@ import com.shvoy.ConflictException;
 import com.shvoy.NotFoundException;
 import com.shvoy.TenantContext;
 import com.shvoy.ValidationException;
+import com.shvoy.purchaseorders.domain.PurchaseOrder;
 import com.shvoy.purchaseorders.domain.PurchaseOrderLine;
 import com.shvoy.purchaseorders.repository.PurchaseOrderLineRepository;
+import com.shvoy.purchaseorders.repository.PurchaseOrderRepository;
 
 /**
  * No class-level @Transactional — see SupplierTenantIsolationTest's
@@ -42,6 +44,9 @@ class PurchaseOrderLinePricingServiceTest {
 
     @Autowired
     PurchaseOrderLineRepository purchaseOrderLineRepository;
+
+    @Autowired
+    PurchaseOrderRepository purchaseOrderRepository;
 
     @Autowired
     JdbcTemplate jdbcTemplate;
@@ -157,6 +162,27 @@ class PurchaseOrderLinePricingServiceTest {
         assertThat(priced.getUnitPrice().currency()).isEqualTo("GBP");
         assertThat(priced.getAppliedTierThreshold()).isEqualTo(100);
         assertThat(priced.getPricedAsOfDate()).isEqualTo(LocalDate.now());
+        // Story 4.3: the tier price (1.5000) x quantity (150) = 225.00,
+        // computed and snapshotted in the same applyPriceResolution call.
+        assertThat(priced.getLineTotal().amount()).isEqualByComparingTo("225.00");
+    }
+
+    @Test
+    void pricingALineRecomputesThePosOrderTotal() {
+        UUID skuId = seedSku(supplierAId, null);
+        seedPrice(skuId, "2.0000", "GBP", LocalDate.of(2026, 1, 1), null);
+        PurchaseOrderLine line = createLine(poAId, skuId, 5);
+
+        priceLine(line);
+
+        TenantContext.set(companyA);
+        PurchaseOrder po;
+        try {
+            po = purchaseOrderRepository.findById(poAId).orElseThrow();
+        } finally {
+            TenantContext.clear();
+        }
+        assertThat(po.getOrderTotal().amount()).isEqualByComparingTo("10.00");
     }
 
     @Test

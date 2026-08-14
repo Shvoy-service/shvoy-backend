@@ -1,5 +1,6 @@
 package com.shvoy.purchaseorders.domain;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
@@ -13,6 +14,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import com.shvoy.Money;
 import com.shvoy.TenantScoped;
 
 /**
@@ -56,6 +58,18 @@ public class PurchaseOrder extends TenantScoped {
     @Column(name = "created_by", nullable = false)
     private UUID createdBy;
 
+    @Column(name = "order_total_amount", precision = 19, scale = 2)
+    private BigDecimal orderTotalAmount;
+
+    @Column(length = 3)
+    private String currency;
+
+    @Column(name = "deposit_amount", precision = 19, scale = 2)
+    private BigDecimal depositAmount;
+
+    @Column(name = "balance_amount", precision = 19, scale = 2)
+    private BigDecimal balanceAmount;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -71,6 +85,39 @@ public class PurchaseOrder extends TenantScoped {
         this.status = PurchaseOrderStatus.DRAFT;
         this.createdBy = createdBy;
         this.createdAt = Instant.now();
+    }
+
+    /**
+     * The order total (Story 4.3) — the sum of this PO's already-rounded
+     * 2dp line totals, never a rounded sum of unrounded line values (see
+     * docs/CONTRACT.md's Money section; {@code PurchaseOrderTotalsService}
+     * does the actual summing, this just stores the result). Null when the
+     * PO has no priced lines yet — never a fabricated zero.
+     */
+    public void applyOrderTotal(Money orderTotal) {
+        this.orderTotalAmount = orderTotal == null ? null : orderTotal.amount();
+        this.currency = orderTotal == null ? null : orderTotal.currency();
+        this.updatedAt = Instant.now();
+    }
+
+    /**
+     * The supplier's payment-terms split (3.3) of this PO's order total —
+     * {@code deposit.plus(balance)} always equals {@link #getOrderTotal}
+     * exactly, since {@code PaymentTerms#split} guarantees it. Cleared
+     * (see {@link #clearDepositBalanceSplit}), not left stale, whenever
+     * there's no order total to split against, or the supplier has no
+     * payment terms configured.
+     */
+    public void applyDepositBalanceSplit(Money deposit, Money balance) {
+        this.depositAmount = deposit.amount();
+        this.balanceAmount = balance.amount();
+        this.updatedAt = Instant.now();
+    }
+
+    public void clearDepositBalanceSplit() {
+        this.depositAmount = null;
+        this.balanceAmount = null;
+        this.updatedAt = Instant.now();
     }
 
     public UUID getId() {
@@ -95,6 +142,21 @@ public class PurchaseOrder extends TenantScoped {
 
     public UUID getCreatedBy() {
         return createdBy;
+    }
+
+    /** Null until at least one line is priced — see {@link #applyOrderTotal}. */
+    public Money getOrderTotal() {
+        return orderTotalAmount == null ? null : new Money(orderTotalAmount, currency);
+    }
+
+    /** Null until {@link #applyDepositBalanceSplit} runs. */
+    public Money getDeposit() {
+        return depositAmount == null ? null : new Money(depositAmount, currency);
+    }
+
+    /** Null until {@link #applyDepositBalanceSplit} runs. */
+    public Money getBalance() {
+        return balanceAmount == null ? null : new Money(balanceAmount, currency);
     }
 
     public Instant getCreatedAt() {
