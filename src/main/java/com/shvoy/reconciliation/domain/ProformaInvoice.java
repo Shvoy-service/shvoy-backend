@@ -16,11 +16,10 @@ import com.shvoy.TenantScoped;
 
 /**
  * A supplier's confirmed proforma invoice, logged against a {@code
- * PurchaseOrder} — see Story 5.1. Data model only: no logging endpoint
- * (5.2), variance calculation (5.3), tolerance/auto-confirm (5.4), approval
- * routing (5.5/5.6), or the full status-lifecycle/audit trail (5.7) exist
- * yet, so this is currently reachable only via direct repository access,
- * same shape as PurchaseOrder before 4.4.
+ * PurchaseOrder} — see Story 5.1 (model) and 5.2 (the logging endpoint,
+ * {@code ProformaInvoiceService}). Variance calculation (5.3), tolerance/
+ * auto-confirm (5.4), approval routing (5.5/5.6), and the full status-
+ * lifecycle/audit trail (5.7) still don't exist yet.
  *
  * {@code purchaseOrderId} is a plain {@code UUID}, not a JPA relationship —
  * matching this codebase's flat-column convention throughout (see
@@ -30,11 +29,11 @@ import com.shvoy.TenantScoped;
  * time — a supplier re-issuing a corrected proforma is a real scenario, so
  * this is one-to-many rather than strictly one-per-PO. {@code active}
  * identifies the current one: exactly one PI per PO is active at a time
- * (superseded PIs are kept, never deleted, for audit). This story only
- * establishes the field — the actual supersession step (marking a prior PI
- * inactive when a correction is logged) belongs to 5.2, the first story
- * with a real caller for it, same split as {@code SkuPrice}'s validity
- * window (modelled in 3.4, actually superseded by 3.5's upload logic).
+ * (superseded PIs are kept, never deleted, for audit) — see {@link
+ * #supersede}, called by {@code ProformaInvoiceService} on the prior active
+ * PI immediately before a correction is saved as the new active one, same
+ * split as {@code SkuPrice}'s validity window (modelled in 3.4, actually
+ * superseded by 3.5's upload logic).
  *
  * {@code currency} is stored explicitly rather than assumed to match the
  * PO's, precisely so a mismatch is representable and detectable — Feature 5
@@ -86,6 +85,18 @@ public class ProformaInvoice extends TenantScoped {
         this.active = true;
         this.loggedBy = loggedBy;
         this.createdAt = Instant.now();
+    }
+
+    /**
+     * Story 5.2's actual supersession step — flips this PI inactive when a
+     * correction is logged against the same PO. {@code ProformaInvoiceService}
+     * is the only caller, same trust-the-caller convention as {@code
+     * PurchaseOrder#cancel}; it's called on whichever PI was previously
+     * active for the PO, immediately before the new one is saved as active.
+     */
+    public void supersede() {
+        this.active = false;
+        this.updatedAt = Instant.now();
     }
 
     public UUID getId() {

@@ -31,10 +31,10 @@ import com.shvoy.TenantScoped;
  *
  * No currency column: a line's currency is always its parent PI's — lines
  * don't change currency — so it's read from there ({@code
- * ProformaInvoiceService}, once it exists, composes the wire-format {@code
- * UnitPrice}), never stored redundantly here where it could drift out of
- * sync. Same inheritance pattern as {@code DiscountTier} inheriting its
- * parent {@code SkuPrice}'s currency.
+ * ProformaInvoiceService} composes the wire-format {@code UnitPrice}),
+ * never stored redundantly here where it could drift out of sync. Same
+ * inheritance pattern as {@code DiscountTier} inheriting its parent {@code
+ * SkuPrice}'s currency.
  *
  * No {@code updated_at}: a logged PI line is an immutable snapshot of what
  * the supplier confirmed — a correction re-issues a whole new {@link

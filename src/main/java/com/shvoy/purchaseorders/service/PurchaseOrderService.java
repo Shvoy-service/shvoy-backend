@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.modulith.NamedInterface;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -35,7 +36,16 @@ import com.shvoy.suppliers.service.SupplierService;
  * which reuses {@link #findOwnPurchaseOrder}/{@link #assertEditable}/
  * {@link #toResponse} from here rather than duplicating the ownership/
  * status-guard/assembly logic.
+ *
+ * {@link #assertOwnPurchaseOrderExists}/{@link #assertOwnPurchaseOrderReadyForPi}
+ * are this class's cross-module surface (Story 5.2) — {@code @NamedInterface},
+ * same pattern as {@code SupplierService}/{@code SkuService}, so {@code
+ * reconciliation} can confirm a PO id belongs to its own tenant (and, for
+ * logging a PI, is far enough along its lifecycle) without {@code
+ * PurchaseOrderRepository}/{@code PurchaseOrder}/{@code PurchaseOrderStatus}
+ * being exposed directly.
  */
+@NamedInterface("purchase-orders")
 @Service
 public class PurchaseOrderService {
 
@@ -110,6 +120,38 @@ public class PurchaseOrderService {
         assertEditable(purchaseOrder);
         purchaseOrder.cancel();
         return toResponse(purchaseOrderRepository.save(purchaseOrder));
+    }
+
+    /**
+     * Throws the same {@link NotFoundException} a missing or cross-tenant
+     * id would throw anywhere else in this module — the cross-module
+     * ownership check itself, with no response body to leak beyond that.
+     * Same pattern as {@code SupplierService#assertOwnSupplierExists}.
+     */
+    @Transactional(readOnly = true)
+    public void assertOwnPurchaseOrderExists(UUID id) {
+        findOwnPurchaseOrder(id);
+    }
+
+    /**
+     * Story 5.2's precondition for logging a PI: the PO must be far enough
+     * along its own lifecycle for a supplier's confirmation to make sense
+     * against it. {@code GENERATED} qualifies alongside {@code SENT} — the
+     * PO may have gone out to the supplier by a means outside the system —
+     * but {@code DRAFT} doesn't, since there's nothing final yet to
+     * reconcile against. Never returns the {@code PurchaseOrder}/{@code
+     * PurchaseOrderStatus} itself, keeping this module's domain internal —
+     * same minimal-cross-module-contract reasoning as {@link
+     * #assertOwnPurchaseOrderExists}.
+     */
+    @Transactional(readOnly = true)
+    public void assertOwnPurchaseOrderReadyForPi(UUID id) {
+        PurchaseOrder purchaseOrder = findOwnPurchaseOrder(id);
+        if (purchaseOrder.getStatus() != PurchaseOrderStatus.GENERATED
+                && purchaseOrder.getStatus() != PurchaseOrderStatus.SENT) {
+            throw new ConflictException(ErrorCode.PO_NOT_READY_FOR_PI,
+                "Purchase order is not ready for a PI in status " + purchaseOrder.getStatus());
+        }
     }
 
     /** Package-visible: reused by {@link PurchaseOrderLineService} so both services share one ownership check. */

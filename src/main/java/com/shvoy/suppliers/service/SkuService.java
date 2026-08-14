@@ -236,6 +236,21 @@ public class SkuService {
         return new SkuSummary(sku.getId(), sku.getCode(), sku.getDescription());
     }
 
+    /**
+     * Company-wide existence check (Story 5.2) — deliberately not scoped to
+     * a single supplier, unlike {@link #getSummary}: a PI line referencing
+     * a SKU that exists in the company but under a different supplier than
+     * the PO's is a genuine discrepancy for reconciliation (5.3) to surface,
+     * not an unknowable typo. Only a SKU id that doesn't exist in the
+     * company at all is rejected here — see {@code ProformaInvoiceService}'s
+     * "record faithfully, judge later" validation posture.
+     */
+    @Transactional(readOnly = true)
+    public void assertOwnSkuExists(UUID skuId) {
+        Sku sku = skuRepository.findById(skuId).orElseThrow(() -> new NotFoundException("SKU not found"));
+        TenantGuard.assertOwned(sku);
+    }
+
     private Sku findOwnSkuUnderSupplier(UUID supplierId, UUID skuId) {
         findOwnSupplier(supplierId);
         Sku sku = skuRepository.findById(skuId).orElseThrow(() -> new NotFoundException("SKU not found"));
