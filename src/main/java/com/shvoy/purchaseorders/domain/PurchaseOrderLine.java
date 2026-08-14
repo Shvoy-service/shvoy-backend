@@ -33,12 +33,12 @@ import com.shvoy.suppliers.dto.PriceResolutionResult;
  * a live reference to a {@code DiscountTier} row (which could later be
  * deleted out from under it by a full-replace tier update — see 3.6).
  *
- * {@code lineTotalAmount} stays nullable with no mutator yet — that's 4.3's
- * job. Everything else ({@code unitPriceAmount}/{@code currency}/
- * {@code appliedTierThreshold}, plus {@code priceFound}/
- * {@code pricedAsOfDate}/{@code cartonValid}/{@code adjustedQuantity}) is
- * set in one shot by {@link #applyPriceResolution}, added in Story 4.2 —
- * see that method's Javadoc.
+ * Every price-related field — {@code unitPriceAmount}/{@code currency}/
+ * {@code appliedTierThreshold}/{@code lineTotalAmount}, plus
+ * {@code priceFound}/{@code pricedAsOfDate}/{@code cartonValid}/
+ * {@code adjustedQuantity} — is set in one shot by
+ * {@link #applyPriceResolution} (Stories 4.2/4.3); see that method's
+ * Javadoc for the line-total composition rule specifically.
  */
 @Entity
 @Table(name = "purchase_order_lines")
@@ -113,6 +113,14 @@ public class PurchaseOrderLine extends TenantScoped {
      * tier fields are null when no valid price was found, so an expired or
      * absent price file is a carried flag (see {@link #getPriceFound}),
      * never a silent zero-price.
+     *
+     * The line total (Story 4.3) is computed right here, in the same
+     * method, rather than as a separate step a caller could forget: the
+     * invariant "if this line has a unit price, it has a line total" holds
+     * the instant either changes, so the line is never left stale relative
+     * to its own price. {@code UnitPrice#multiply} does the actual
+     * rounding (raw 4dp price × integer quantity, rounded once to 2dp
+     * HALF_EVEN via {@code Money}) — not reimplemented here.
      */
     public void applyPriceResolution(PriceResolutionResult result) {
         this.priceFound = result.priceFound();
@@ -122,6 +130,7 @@ public class PurchaseOrderLine extends TenantScoped {
         this.pricedAsOfDate = result.asOfDate();
         this.cartonValid = result.cartonValid();
         this.adjustedQuantity = result.adjustedQuantity();
+        this.lineTotalAmount = result.priceFound() ? result.unitPrice().multiply(quantity).amount() : null;
         this.updatedAt = Instant.now();
     }
 

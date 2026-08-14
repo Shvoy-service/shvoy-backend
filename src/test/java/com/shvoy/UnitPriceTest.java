@@ -47,4 +47,34 @@ class UnitPriceTest {
 
         assertThat(price).isEqualTo(new UnitPrice(new BigDecimal("1.4275"), "GBP"));
     }
+
+    // --- multiply (Story 4.3's line-total composition rule) ---
+
+    @Test
+    void multiplyRoundsTheRawProductOnceRatherThanPreRoundingThePrice() {
+        // 1.4275 x 3 = 4.2825 — doesn't land on a clean 2dp value, so this
+        // proves the 4dp price is used at full precision in the
+        // multiplication, not truncated to 2dp first.
+        Money total = new UnitPrice(new BigDecimal("1.4275"), "GBP").multiply(3);
+
+        assertThat(total.amount()).isEqualByComparingTo("4.28");
+        assertThat(total.currency()).isEqualTo("GBP");
+    }
+
+    @Test
+    void multiplyRoundsHalfEvenNotHalfUpOnAnExactTie() {
+        // 0.1250 x 1 = 0.1250 — ties exactly between 0.12 and 0.13.
+        // HALF_EVEN picks 0.12 (even); HALF_UP would pick 0.13 — this is
+        // the case that actually distinguishes the two modes.
+        Money total = new UnitPrice(new BigDecimal("0.1250"), "USD").multiply(1);
+
+        assertThat(total.amount()).isEqualByComparingTo("0.12");
+    }
+
+    @Test
+    void multiplyLeavesAnAlreadyCleanProductUnchanged() {
+        Money total = new UnitPrice(new BigDecimal("2.5000"), "GBP").multiply(4);
+
+        assertThat(total.amount()).isEqualByComparingTo("10.00");
+    }
 }

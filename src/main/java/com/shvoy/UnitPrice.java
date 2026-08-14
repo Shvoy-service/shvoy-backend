@@ -20,10 +20,6 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize;
  * Same wire format and rounding mode as {@code Money} otherwise — string
  * amount plus currency, HALF_EVEN — via the same {@link AmountSerializer}/
  * {@link AmountDeserializer}.
- *
- * No arithmetic methods yet (no {@code plus}/{@code multiply}): converting
- * a unit price into a line-item {@code Money} total is Feature 4/3.8's
- * concern (price resolution, PO creation), not this story's.
  */
 public record UnitPrice(
         @JsonSerialize(using = AmountSerializer.class)
@@ -39,5 +35,16 @@ public record UnitPrice(
         Objects.requireNonNull(currency, "currency");
         Currency.getInstance(currency); // throws IllegalArgumentException for anything not a real ISO 4217 code
         amount = amount.setScale(SCALE, ROUNDING_MODE);
+    }
+
+    /**
+     * The line-total composition rule (Story 4.3, docs/CONTRACT.md's Money
+     * section): the raw product of this 4dp price and an integer quantity
+     * is rounded exactly once, to {@code Money}'s 2dp/HALF_EVEN scale, via
+     * {@code Money}'s own compact constructor — never pre-rounded to 2dp
+     * before multiplying, which would compound error at volume.
+     */
+    public Money multiply(int quantity) {
+        return new Money(amount.multiply(BigDecimal.valueOf(quantity)), currency);
     }
 }
