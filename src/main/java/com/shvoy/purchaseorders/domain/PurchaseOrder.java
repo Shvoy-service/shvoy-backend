@@ -76,6 +76,15 @@ public class PurchaseOrder extends TenantScoped {
     @Column(name = "updated_at")
     private Instant updatedAt;
 
+    @Column(name = "generated_by")
+    private UUID generatedBy;
+
+    @Column(name = "generated_at")
+    private Instant generatedAt;
+
+    @Column(name = "document_s3_key", length = 500)
+    private String documentS3Key;
+
     protected PurchaseOrder() {
     }
 
@@ -153,6 +162,25 @@ public class PurchaseOrder extends TenantScoped {
         return status == PurchaseOrderStatus.DRAFT;
     }
 
+    /**
+     * Story 4.6's finalisation — the one-way {@code DRAFT} → {@code
+     * GENERATED} transition, plus the generation metadata (who, when) and
+     * the S3 reference to the stored PDF. Called only after every
+     * finalisation precondition already passed (status, line count, ETD
+     * set, the 4.5 expired-price gate) — this method itself doesn't
+     * re-check any of them, same trust-the-caller convention as {@link
+     * #cancel}. Once generated, the line snapshots this PO carries don't
+     * change afterward — {@link #isEditable} already blocks every mutation
+     * path from here on, so there's no separate "lock the prices" step.
+     */
+    public void applyGeneration(UUID generatedBy, String documentS3Key) {
+        this.status = PurchaseOrderStatus.GENERATED;
+        this.generatedBy = generatedBy;
+        this.generatedAt = Instant.now();
+        this.documentS3Key = documentS3Key;
+        this.updatedAt = Instant.now();
+    }
+
     public UUID getId() {
         return id;
     }
@@ -198,5 +226,20 @@ public class PurchaseOrder extends TenantScoped {
 
     public Instant getUpdatedAt() {
         return updatedAt;
+    }
+
+    /** Null until {@link #applyGeneration} runs. */
+    public UUID getGeneratedBy() {
+        return generatedBy;
+    }
+
+    /** Null until {@link #applyGeneration} runs. */
+    public Instant getGeneratedAt() {
+        return generatedAt;
+    }
+
+    /** Null until {@link #applyGeneration} runs. */
+    public String getDocumentS3Key() {
+        return documentS3Key;
     }
 }

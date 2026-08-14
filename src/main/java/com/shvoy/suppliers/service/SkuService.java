@@ -9,6 +9,7 @@ import java.util.UUID;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.modulith.NamedInterface;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,6 +26,7 @@ import com.shvoy.suppliers.dto.CreateSkuRequest;
 import com.shvoy.suppliers.dto.SkuPriceRequest;
 import com.shvoy.suppliers.dto.SkuPriceResponse;
 import com.shvoy.suppliers.dto.SkuResponse;
+import com.shvoy.suppliers.dto.SkuSummary;
 import com.shvoy.suppliers.dto.SkuWithPriceResponse;
 import com.shvoy.suppliers.dto.UpdateSkuRequest;
 import com.shvoy.suppliers.repository.SkuPriceRepository;
@@ -38,7 +40,14 @@ import com.shvoy.suppliers.repository.SupplierRepository;
  * PriceFileUploadService (bulk upload) calls the same {@link #createSku}/
  * {@link #addPrice} methods per row, so manual entry and upload rows go
  * through identical validation/supersession logic.
+ *
+ * {@link #getSummary} is this class's cross-module surface (Story 4.6) —
+ * {@code @NamedInterface}, same pattern as {@code SupplierService}/{@code
+ * PaymentTermsService}, so another module (purchaseorders, for its PO
+ * document) can look up a SKU's code/description without {@code
+ * SkuRepository}/{@code Sku} being exposed directly.
  */
+@NamedInterface("suppliers")
 @Service
 public class SkuService {
 
@@ -219,6 +228,12 @@ public class SkuService {
         } catch (DataIntegrityViolationException e) {
             throw new ConflictException(ErrorCode.DUPLICATE_SKU, "SKU code already exists for this supplier: " + sku.getCode());
         }
+    }
+
+    @Transactional(readOnly = true)
+    public SkuSummary getSummary(UUID supplierId, UUID skuId) {
+        Sku sku = findOwnSkuUnderSupplier(supplierId, skuId);
+        return new SkuSummary(sku.getId(), sku.getCode(), sku.getDescription());
     }
 
     private Sku findOwnSkuUnderSupplier(UUID supplierId, UUID skuId) {

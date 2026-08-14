@@ -17,6 +17,7 @@ import com.shvoy.suppliers.domain.Supplier;
 import com.shvoy.suppliers.domain.SupplierStatus;
 import com.shvoy.suppliers.dto.SupplierRequest;
 import com.shvoy.suppliers.dto.SupplierResponse;
+import com.shvoy.suppliers.dto.SupplierSummary;
 import com.shvoy.suppliers.repository.SupplierRepository;
 
 /**
@@ -90,6 +91,18 @@ public class SupplierService {
         Supplier supplier = findOwnSupplier(id);
         supplier.deactivate();
         return toResponse(supplierRepository.save(supplier));
+    }
+
+    /**
+     * Story 4.6's other cross-module surface: the minimal supplier detail a
+     * PO document needs to display, not the full {@link SupplierResponse}
+     * shape (status/timestamps a customer-facing document has no business
+     * showing) — see {@link SupplierSummary}'s Javadoc.
+     */
+    @Transactional(readOnly = true)
+    public SupplierSummary getSummary(UUID id) {
+        Supplier supplier = findOwnSupplier(id);
+        return new SupplierSummary(supplier.getId(), supplier.getName(), supplier.getCountry(), supplier.getContactEmail());
     }
 
     /**

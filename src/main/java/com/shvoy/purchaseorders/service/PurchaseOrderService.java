@@ -127,7 +127,7 @@ public class PurchaseOrderService {
         }
     }
 
-    /** Package-visible: reused by {@link PurchaseOrderLineService} to return the same full representation after a line mutation. */
+    /** Package-visible: reused by {@link PurchaseOrderLineService}/{@code PurchaseOrderGenerationService} to return the same full representation after a mutation. */
     PurchaseOrderResponse toResponse(PurchaseOrder purchaseOrder) {
         List<PurchaseOrderLineResponse> lines = purchaseOrderLineRepository.findAll().stream()
             .filter(line -> line.getPurchaseOrderId().equals(purchaseOrder.getId()))
@@ -147,7 +147,9 @@ public class PurchaseOrderService {
             purchaseOrder.getBalance(),
             lines,
             purchaseOrder.getCreatedAt(),
-            purchaseOrder.getUpdatedAt());
+            purchaseOrder.getUpdatedAt(),
+            purchaseOrder.getGeneratedBy(),
+            purchaseOrder.getGeneratedAt());
     }
 
     private static PurchaseOrderLineResponse toLineResponse(PurchaseOrderLine line) {

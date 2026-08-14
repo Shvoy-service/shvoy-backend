@@ -72,6 +72,30 @@
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
+        <!--
+          Story 4.6 (PO document generation): Thymeleaf builds the document's
+          HTML from a plain data model (never wired into MVC view resolution —
+          this app has no server-rendered views, just used as a string
+          template engine), openhtmltopdf-pdfbox renders that HTML+CSS to
+          PDF bytes. Chosen over iText (AGPL/commercial dual-licensed — the
+          license trap this story explicitly flagged) and JasperReports
+          (also GPL/commercial, heavier template tooling for no benefit
+          here). openhtmltopdf is LGPL 2.1+, actively maintained (the
+          io.github.openhtmltopdf fork, not the abandoned original
+          com.openhtmltopdf coordinates), built on Apache PDFBox 3.x
+          (Apache 2.0) — see docs/CONTRACT.md's Story 4.6 section for the
+          full rationale.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-thymeleaf</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.github.openhtmltopdf</groupId>
+            <artifactId>openhtmltopdf-pdfbox</artifactId>
+            <version>1.1.73</version>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.modulith</groupId>
             <artifactId>spring-modulith-starter-core</artifactId>
