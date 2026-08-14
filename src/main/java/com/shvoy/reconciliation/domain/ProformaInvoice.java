@@ -99,6 +99,26 @@ public class ProformaInvoice extends TenantScoped {
         this.updatedAt = Instant.now();
     }
 
+    /**
+     * Story 5.4's outcome transition — mirrors the {@code Reconciliation}'s
+     * outcome onto the PI's own lifecycle status. Auto-confirm is a
+     * <strong>system</strong> action (no user), so there's no actor argument;
+     * the audit of what/when/against-what-variance lives on the {@code
+     * Reconciliation} record. The full lifecycle guarding (which transitions
+     * are legal from which state) is 5.7's; here the PI is freshly {@code
+     * LOGGED} and this runs once, right after the comparison.
+     */
+    public void markAutoConfirmed() {
+        this.status = ProformaInvoiceStatus.AUTO_CONFIRMED;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Story 5.4 — routed to approval; the approval mechanics (who, the 2-of-N gate) are 5.5/5.6. */
+    public void markRoutedForApproval() {
+        this.status = ProformaInvoiceStatus.ROUTED_FOR_APPROVAL;
+        this.updatedAt = Instant.now();
+    }
+
     public UUID getId() {
         return id;
     }

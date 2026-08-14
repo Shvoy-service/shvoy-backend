@@ -149,7 +149,9 @@ class ProformaInvoiceControllerTest {
             .andExpect(jsonPath("$.purchaseOrderId").value(poId.toString()))
             .andExpect(jsonPath("$.piReference").value("SUP-REF-1"))
             .andExpect(jsonPath("$.currency").value("USD"))
-            .andExpect(jsonPath("$.status").value("LOGGED"))
+            // Logging now triggers evaluation (Story 5.4): this PO has no lines, so the PI's line is
+            // an unmatched (structural) finding, which routes rather than staying LOGGED.
+            .andExpect(jsonPath("$.status").value("ROUTED_FOR_APPROVAL"))
             .andExpect(jsonPath("$.active").value(true))
             .andExpect(jsonPath("$.loggedBy").value(userAId.toString()))
             .andExpect(jsonPath("$.lines[0].skuId").value(skuId.toString()))

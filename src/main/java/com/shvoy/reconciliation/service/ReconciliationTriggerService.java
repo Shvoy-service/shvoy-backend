@@ -25,13 +25,25 @@ public class ReconciliationTriggerService {
     private static final Logger log = LoggerFactory.getLogger(ReconciliationTriggerService.class);
 
     private final ReconciliationService reconciliationService;
+    private final ToleranceEvaluationService toleranceEvaluationService;
 
-    ReconciliationTriggerService(ReconciliationService reconciliationService) {
+    ReconciliationTriggerService(ReconciliationService reconciliationService,
+            ToleranceEvaluationService toleranceEvaluationService) {
         this.reconciliationService = reconciliationService;
+        this.toleranceEvaluationService = toleranceEvaluationService;
     }
 
+    /**
+     * Compute the comparison (5.3) then evaluate its outcome (5.4) — two
+     * distinct steps in their own transactions, so a reconciliation is
+     * durably recorded even if evaluation later fails (leaving it in the
+     * "computed but not yet evaluated" state {@code ToleranceEvaluationService}
+     * can re-run). The whole call is already wrapped by {@code
+     * ProformaInvoiceService#log} so any failure here never fails the log.
+     */
     public void onPiLogged(UUID proformaInvoiceId) {
         UUID reconciliationId = reconciliationService.reconcile(proformaInvoiceId);
-        log.info("PI {} logged; reconciliation {} recorded", proformaInvoiceId, reconciliationId);
+        var outcome = toleranceEvaluationService.evaluate(reconciliationId);
+        log.info("PI {} logged; reconciliation {} recorded, outcome {}", proformaInvoiceId, reconciliationId, outcome);
     }
 }

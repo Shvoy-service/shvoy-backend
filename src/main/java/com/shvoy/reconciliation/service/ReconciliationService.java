@@ -25,7 +25,10 @@ import com.shvoy.purchaseorders.service.PurchaseOrderService;
 import com.shvoy.reconciliation.domain.ProformaInvoice;
 import com.shvoy.reconciliation.domain.ProformaInvoiceLine;
 import com.shvoy.reconciliation.domain.Reconciliation;
+import com.shvoy.reconciliation.domain.ReconciliationFindingType;
 import com.shvoy.reconciliation.domain.ReconciliationLine;
+import com.shvoy.reconciliation.domain.ReconciliationOutcome;
+import com.shvoy.reconciliation.domain.RoutingReason;
 import com.shvoy.reconciliation.dto.ReconciliationLineResponse;
 import com.shvoy.reconciliation.dto.ReconciliationResponse;
 import com.shvoy.reconciliation.dto.VarianceDirection;
@@ -212,9 +215,12 @@ public class ReconciliationService {
     }
 
     private ReconciliationResponse toResponse(Reconciliation reconciliation) {
-        List<ReconciliationLineResponse> lines = reconciliationLineRepository.findAll().stream()
+        List<ReconciliationLine> storedLines = reconciliationLineRepository.findAll().stream()
             .filter(line -> line.getReconciliationId().equals(reconciliation.getId()))
             .sorted(Comparator.comparing(ReconciliationLine::getCreatedAt))
+            .toList();
+
+        List<ReconciliationLineResponse> lines = storedLines.stream()
             .map(line -> toLineResponse(line, reconciliation))
             .toList();
 
@@ -227,8 +233,43 @@ public class ReconciliationService {
             reconciliation.getPoCurrency(),
             reconciliation.getPiCurrency(),
             reconciliation.isCurrencyMismatch(),
+            reconciliation.getOutcome(),
+            reconciliation.getToleranceApplied(),
+            routingReasons(reconciliation, storedLines),
             lines,
             reconciliation.getCreatedAt());
+    }
+
+    /**
+     * Why the PI routed — derived from the recorded comparison and the
+     * recorded {@code toleranceApplied} (Story 5.4), not a denormalised
+     * column: every input is already persisted, so the reason stays a
+     * deterministic function of the immutable record. Empty when the PI
+     * auto-confirmed, or when the record hasn't been evaluated yet (no
+     * {@code toleranceApplied}).
+     */
+    private static List<RoutingReason> routingReasons(Reconciliation reconciliation, List<ReconciliationLine> lines) {
+        if (reconciliation.getOutcome() != ReconciliationOutcome.ROUTED_FOR_APPROVAL) {
+            return List.of();
+        }
+        List<RoutingReason> reasons = new ArrayList<>();
+        if (reconciliation.isCurrencyMismatch()) {
+            reasons.add(RoutingReason.CURRENCY_MISMATCH);
+        }
+        boolean anyStructural = lines.stream()
+            .anyMatch(line -> line.getFindingType() != ReconciliationFindingType.MATCHED);
+        if (anyStructural) {
+            reasons.add(RoutingReason.STRUCTURAL_FINDING);
+        }
+        BigDecimal tolerance = reconciliation.getToleranceApplied();
+        boolean anyOutsideTolerance = tolerance != null && lines.stream()
+            .filter(line -> line.getFindingType() == ReconciliationFindingType.MATCHED)
+            .anyMatch(line -> line.getUnitPriceVariancePct() != null
+                && line.getUnitPriceVariancePct().abs().compareTo(tolerance) >= 0);
+        if (anyOutsideTolerance) {
+            reasons.add(RoutingReason.VARIANCE_OUTSIDE_TOLERANCE);
+        }
+        return reasons;
     }
 
     private static ReconciliationLineResponse toLineResponse(ReconciliationLine line, Reconciliation reconciliation) {
