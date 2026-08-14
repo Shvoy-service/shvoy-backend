@@ -1,6 +1,7 @@
 package com.shvoy.purchaseorders.service;
 
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -23,6 +24,8 @@ import com.shvoy.purchaseorders.domain.PurchaseOrderSend;
 import com.shvoy.purchaseorders.domain.PurchaseOrderStatus;
 import com.shvoy.purchaseorders.dto.CreatePurchaseOrderRequest;
 import com.shvoy.purchaseorders.dto.PurchaseOrderLineResponse;
+import com.shvoy.purchaseorders.dto.PurchaseOrderReconciliationLine;
+import com.shvoy.purchaseorders.dto.PurchaseOrderReconciliationView;
 import com.shvoy.purchaseorders.dto.PurchaseOrderResponse;
 import com.shvoy.purchaseorders.dto.UpdateRequestedEtdRequest;
 import com.shvoy.purchaseorders.repository.PurchaseOrderLineRepository;
@@ -152,6 +155,48 @@ public class PurchaseOrderService {
             throw new ConflictException(ErrorCode.PO_NOT_READY_FOR_PI,
                 "Purchase order is not ready for a PI in status " + purchaseOrder.getStatus());
         }
+    }
+
+    /**
+     * Story 5.3's cross-module surface: the PO leg of a variance comparison
+     * — supplier, currency, generation date, and each line's snapshotted
+     * SKU/quantity/unit-price. Read-only; never exposes the {@code
+     * PurchaseOrder}/{@code PurchaseOrderLine} entities themselves, only the
+     * narrow {@link PurchaseOrderReconciliationView} the comparison reads.
+     * The prices are the Feature 4 snapshot, deliberately — reconciliation
+     * compares a PI against the price the PO actually carried, never a fresh
+     * re-resolve (see {@code PurchaseOrderLine}'s price-snapshot Javadoc).
+     */
+    @Transactional(readOnly = true)
+    public PurchaseOrderReconciliationView getReconciliationView(UUID id) {
+        PurchaseOrder purchaseOrder = findOwnPurchaseOrder(id);
+
+        List<PurchaseOrderLine> lines = purchaseOrderLineRepository.findAll().stream()
+            .filter(line -> line.getPurchaseOrderId().equals(purchaseOrder.getId()))
+            .sorted(Comparator.comparingInt(PurchaseOrderLine::getLineNumber))
+            .toList();
+
+        String currency = lines.stream()
+            .map(PurchaseOrderLine::getUnitPrice)
+            .filter(unitPrice -> unitPrice != null)
+            .map(unitPrice -> unitPrice.currency())
+            .findFirst()
+            .orElse(null);
+
+        LocalDate generationDate = purchaseOrder.getGeneratedAt() == null
+            ? null
+            : LocalDate.ofInstant(purchaseOrder.getGeneratedAt(), ZoneOffset.UTC);
+
+        List<PurchaseOrderReconciliationLine> viewLines = lines.stream()
+            .map(line -> new PurchaseOrderReconciliationLine(
+                line.getSkuId(),
+                line.getQuantity(),
+                line.getUnitPrice() == null ? null : line.getUnitPrice().amount(),
+                Boolean.TRUE.equals(line.getPriceFound())))
+            .toList();
+
+        return new PurchaseOrderReconciliationView(
+            purchaseOrder.getId(), purchaseOrder.getSupplierId(), currency, generationDate, viewLines);
     }
 
     /** Package-visible: reused by {@link PurchaseOrderLineService} so both services share one ownership check. */
