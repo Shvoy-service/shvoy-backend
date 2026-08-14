@@ -175,6 +175,24 @@ public class ApproverPoolService {
         return resolveRequiredCount();
     }
 
+    /**
+     * Email addresses of the currently-eligible pool approvers — the
+     * recipients 5.5 notifies that a routed PI awaits sign-off, through the
+     * shared {@code EmailSender} seam. Returns addresses only (no ids), since
+     * that's all a notification needs; same eligibility filter as {@link
+     * #resolveEligibleApprovers}.
+     */
+    @Transactional(readOnly = true)
+    public List<String> resolveEligibleApproverEmails() {
+        Map<UUID, User> usersById = userRepository.findAll().stream()
+            .collect(Collectors.toMap(User::getId, Function.identity()));
+        return approverPoolMemberRepository.findAll().stream()
+            .map(member -> usersById.get(member.getUserId()))
+            .filter(ApproverPoolService::isEligible)
+            .map(User::getEmail)
+            .toList();
+    }
+
     // --- internals ---
 
     private Set<UUID> eligibleApproverIds() {

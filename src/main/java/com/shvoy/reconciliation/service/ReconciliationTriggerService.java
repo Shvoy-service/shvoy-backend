@@ -6,6 +6,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import com.shvoy.reconciliation.domain.ReconciliationOutcome;
+
 /**
  * The post-log reconciliation seam (Story 5.2's scope item 4, filled in by
  * 5.3). Deliberately called only after {@code ProformaInvoiceRecordingService#recordPi}'s
@@ -26,24 +28,32 @@ public class ReconciliationTriggerService {
 
     private final ReconciliationService reconciliationService;
     private final ToleranceEvaluationService toleranceEvaluationService;
+    private final ApproverNotifier approverNotifier;
 
     ReconciliationTriggerService(ReconciliationService reconciliationService,
-            ToleranceEvaluationService toleranceEvaluationService) {
+            ToleranceEvaluationService toleranceEvaluationService,
+            ApproverNotifier approverNotifier) {
         this.reconciliationService = reconciliationService;
         this.toleranceEvaluationService = toleranceEvaluationService;
+        this.approverNotifier = approverNotifier;
     }
 
     /**
-     * Compute the comparison (5.3) then evaluate its outcome (5.4) — two
-     * distinct steps in their own transactions, so a reconciliation is
-     * durably recorded even if evaluation later fails (leaving it in the
-     * "computed but not yet evaluated" state {@code ToleranceEvaluationService}
-     * can re-run). The whole call is already wrapped by {@code
-     * ProformaInvoiceService#log} so any failure here never fails the log.
+     * Compute the comparison (5.3), evaluate its outcome (5.4), and — when the
+     * PI is routed for approval — notify the approvers (5.5). The first two are
+     * distinct steps in their own transactions, so a reconciliation is durably
+     * recorded even if evaluation later fails (leaving it in the "computed but
+     * not yet evaluated" state {@code ToleranceEvaluationService} can re-run).
+     * The whole call is already wrapped by {@code ProformaInvoiceService#log},
+     * so any failure here — including a notification failure — never fails the
+     * log; the approver notification is best-effort, same as PO-send email.
      */
     public void onPiLogged(UUID proformaInvoiceId) {
         UUID reconciliationId = reconciliationService.reconcile(proformaInvoiceId);
-        var outcome = toleranceEvaluationService.evaluate(reconciliationId);
+        ReconciliationOutcome outcome = toleranceEvaluationService.evaluate(reconciliationId);
         log.info("PI {} logged; reconciliation {} recorded, outcome {}", proformaInvoiceId, reconciliationId, outcome);
+        if (outcome == ReconciliationOutcome.ROUTED_FOR_APPROVAL) {
+            approverNotifier.notifyRouted(proformaInvoiceId);
+        }
     }
 }
