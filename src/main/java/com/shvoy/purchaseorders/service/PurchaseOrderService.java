@@ -199,6 +199,18 @@ public class PurchaseOrderService {
             purchaseOrder.getId(), purchaseOrder.getSupplierId(), currency, generationDate, viewLines);
     }
 
+    /**
+     * Story 5.5's cross-module surface: who raised this PO, for the
+     * self-approval segregation-of-duties check (the PO creator must not be
+     * able to sign off a price increase on their own order). Returns just the
+     * {@code users.id} reference, never the {@code PurchaseOrder} itself —
+     * same minimal-contract discipline as the other cross-module methods here.
+     */
+    @Transactional(readOnly = true)
+    public UUID getCreatedBy(UUID id) {
+        return findOwnPurchaseOrder(id).getCreatedBy();
+    }
+
     /** Package-visible: reused by {@link PurchaseOrderLineService} so both services share one ownership check. */
     PurchaseOrder findOwnPurchaseOrder(UUID id) {
         PurchaseOrder purchaseOrder = purchaseOrderRepository.findById(id)

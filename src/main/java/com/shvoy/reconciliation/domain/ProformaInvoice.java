@@ -119,6 +119,24 @@ public class ProformaInvoice extends TenantScoped {
         this.updatedAt = Instant.now();
     }
 
+    /**
+     * Story 5.5 — a routed PI cleared its approval requirement (a single
+     * approver on the non-increase path, or the Nth distinct pool sign-off on
+     * a price increase). The immutable {@code ApprovalAction} rows are the
+     * audit of who/when/why; this only moves the lifecycle status. Full
+     * transition guarding is 5.7's.
+     */
+    public void markApproved() {
+        this.status = ProformaInvoiceStatus.APPROVED;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Story 5.5 — a single rejection is enough to reject a routed PI; the rejecting {@code ApprovalAction} records who/when/why. */
+    public void markRejected() {
+        this.status = ProformaInvoiceStatus.REJECTED;
+        this.updatedAt = Instant.now();
+    }
+
     public UUID getId() {
         return id;
     }
