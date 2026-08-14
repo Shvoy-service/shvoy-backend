@@ -9,5 +9,6 @@ package com.shvoy.suppliers.domain;
 public enum AnchorEvent {
     BL,
     INVOICE,
-    ARRIVAL
+    ARRIVAL,
+    EX_FACTORY
 }

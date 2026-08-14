@@ -94,8 +94,8 @@ class PriceFileUploadControllerTest {
     @WithMockUser(roles = "PURCHASING")
     void uploadsValidFileAndAppliesAllRows() throws Exception {
         String csv = HEADER
-            + "SKU-1,Widget,1.4275,GBP,2026-01-01,\n"
-            + "SKU-2,Gadget,9.99,GBP,2026-01-01,\n";
+            + "SKU-1,Widget,1.4275,USD,2026-01-01,\n"
+            + "SKU-2,Gadget,9.99,USD,2026-01-01,\n";
 
         mockMvc.perform(multipart("/api/suppliers/{id}/price-file", supplierAId)
                 .file(csvFile(csv))
@@ -118,8 +118,8 @@ class PriceFileUploadControllerTest {
     @WithMockUser(roles = "PURCHASING")
     void uploadWithAnInvalidRowRejectsTheWholeFile() throws Exception {
         String csv = HEADER
-            + "SKU-1,Widget,1.4275,GBP,2026-01-01,\n"
-            + "SKU-2,Gadget,not-a-number,GBP,2026-01-01,\n";
+            + "SKU-1,Widget,1.4275,USD,2026-01-01,\n"
+            + "SKU-2,Gadget,not-a-number,USD,2026-01-01,\n";
 
         mockMvc.perform(multipart("/api/suppliers/{id}/price-file", supplierAId)
                 .file(csvFile(csv))
@@ -152,7 +152,7 @@ class PriceFileUploadControllerTest {
     @WithMockUser(roles = "PURCHASING")
     void uploadForAnotherCompanysSupplierReturnsNotFoundWithoutTouchingS3() throws Exception {
         mockMvc.perform(multipart("/api/suppliers/{id}/price-file", supplierBId)
-                .file(csvFile(HEADER + "SKU-1,Widget,1.00,GBP,2026-01-01,\n"))
+                .file(csvFile(HEADER + "SKU-1,Widget,1.00,USD,2026-01-01,\n"))
                 .header(TENANT_HEADER, companyA.toString()))
             .andExpect(status().isNotFound())
             .andExpect(jsonPath("$.code").value("NOT_FOUND"));
@@ -164,7 +164,7 @@ class PriceFileUploadControllerTest {
     @WithMockUser(roles = "READ_ONLY")
     void uploadIsForbiddenForReadOnlyRole() throws Exception {
         mockMvc.perform(multipart("/api/suppliers/{id}/price-file", supplierAId)
-                .file(csvFile(HEADER + "SKU-1,Widget,1.00,GBP,2026-01-01,\n"))
+                .file(csvFile(HEADER + "SKU-1,Widget,1.00,USD,2026-01-01,\n"))
                 .header(TENANT_HEADER, companyA.toString()))
             .andExpect(status().isForbidden())
             .andExpect(jsonPath("$.code").value("FORBIDDEN"));

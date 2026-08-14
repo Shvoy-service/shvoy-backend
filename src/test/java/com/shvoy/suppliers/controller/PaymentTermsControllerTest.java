@@ -193,6 +193,46 @@ class PaymentTermsControllerTest {
             .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
 
+    @Test
+    @WithMockUser(roles = "PURCHASING")
+    void setWithExFactoryAnchorEventIsAccepted() throws Exception {
+        UUID supplierId = seedSupplier(companyA, "Acme Corp");
+
+        mockMvc.perform(put("/api/suppliers/{id}/payment-terms", supplierId)
+                .header(TENANT_HEADER, companyA.toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"depositPercentage\":30,\"anchorEvent\":\"EX_FACTORY\",\"daysOffset\":30}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.anchorEvent").value("EX_FACTORY"));
+    }
+
+    /** Consolidation ticket: PO confirmed fractional deposit % is allowed up to 1dp, not more. */
+    @Test
+    @WithMockUser(roles = "PURCHASING")
+    void setWithDepositPercentageBeyondOneDecimalPlaceReturnsValidationError() throws Exception {
+        UUID supplierId = seedSupplier(companyA, "Acme Corp");
+
+        mockMvc.perform(put("/api/suppliers/{id}/payment-terms", supplierId)
+                .header(TENANT_HEADER, companyA.toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"depositPercentage\":33.55,\"anchorEvent\":\"BL\",\"daysOffset\":30}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
+    }
+
+    @Test
+    @WithMockUser(roles = "PURCHASING")
+    void setWithDepositPercentageAtOneDecimalPlaceIsAccepted() throws Exception {
+        UUID supplierId = seedSupplier(companyA, "Acme Corp");
+
+        mockMvc.perform(put("/api/suppliers/{id}/payment-terms", supplierId)
+                .header(TENANT_HEADER, companyA.toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"depositPercentage\":33.5,\"anchorEvent\":\"BL\",\"daysOffset\":30}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.depositPercentage").value(33.5));
+    }
+
     // --- get ---
 
     @Test

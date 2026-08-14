@@ -73,7 +73,7 @@ class DiscountTierControllerTest {
         UUID id = UUID.randomUUID();
         jdbcTemplate.update(
             "INSERT INTO sku_prices (id, sku_id, unit_price_amount, currency, valid_from, created_at, company_id) "
-                + "VALUES (?, ?, ?, 'GBP', ?, ?, ?)",
+                + "VALUES (?, ?, ?, 'USD', ?, ?, ?)",
             id, skuId, new BigDecimal(unitPriceAmount), java.sql.Date.valueOf(LocalDate.now()),
             Timestamp.from(Instant.now()), companyId);
         return id;
@@ -226,7 +226,7 @@ class DiscountTierControllerTest {
         mockMvc.perform(get(TIERS_PATH, supplierAId, skuAId, priceAId).header(TENANT_HEADER, companyA.toString()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].quantityThreshold").value(100))
-            .andExpect(jsonPath("$[0].unitPrice.currency").value("GBP"));
+            .andExpect(jsonPath("$[0].unitPrice.currency").value("USD"));
     }
 
     @Test

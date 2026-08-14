@@ -134,7 +134,7 @@ class PurchaseOrderTotalsServiceTest {
     @Test
     void aLineTotalThatRequiresRoundingIsIncludedAtItsRoundedValue() {
         // 1.4275 x 3 = 4.2825 - doesn't land on a clean 2dp value.
-        seedPricedLine("1.4275", 3, "GBP");
+        seedPricedLine("1.4275", 3, "USD");
 
         PurchaseOrder result = recompute();
 
@@ -145,9 +145,9 @@ class PurchaseOrderTotalsServiceTest {
     void orderTotalIsTheSumOfAlreadyRoundedLineTotalsNotARoundedSumOfUnroundedValues() {
         // Each line: unit price 0.0125 x qty 10 = raw 0.1250, an exact
         // HALF_EVEN tie between 0.12/0.13 - rounds to 0.12 (2 is even).
-        seedPricedLine("0.0125", 10, "GBP");
-        seedPricedLine("0.0125", 10, "GBP");
-        seedPricedLine("0.0125", 10, "GBP");
+        seedPricedLine("0.0125", 10, "USD");
+        seedPricedLine("0.0125", 10, "USD");
+        seedPricedLine("0.0125", 10, "USD");
 
         PurchaseOrder result = recompute();
 
@@ -170,7 +170,7 @@ class PurchaseOrderTotalsServiceTest {
     void aTiedValueRoundsHalfEvenNotHalfUp() {
         // 0.1250 x 1 = 0.1250 exactly - ties between 0.12 and 0.13.
         // HALF_UP would give 0.13; HALF_EVEN gives 0.12 (even).
-        seedPricedLine("0.1250", 1, "GBP");
+        seedPricedLine("0.1250", 1, "USD");
 
         PurchaseOrder result = recompute();
 
@@ -179,7 +179,7 @@ class PurchaseOrderTotalsServiceTest {
 
     @Test
     void unpricedLinesDoNotContributeToTheOrderTotal() {
-        seedPricedLine("2.0000", 5, "GBP");
+        seedPricedLine("2.0000", 5, "USD");
         seedUnpricedLine();
 
         PurchaseOrder result = recompute();
@@ -202,7 +202,7 @@ class PurchaseOrderTotalsServiceTest {
     void depositAndBalanceSplitOnAnOddTotalReconcileExactly() {
         seedPaymentTerms("30");
         // 100.01 doesn't divide cleanly by 30%.
-        seedPricedLine("100.0100", 1, "GBP");
+        seedPricedLine("100.0100", 1, "USD");
 
         PurchaseOrder result = recompute();
 
@@ -214,7 +214,7 @@ class PurchaseOrderTotalsServiceTest {
 
     @Test
     void noPaymentTermsLeavesDepositAndBalanceNullRatherThanStale() {
-        seedPricedLine("2.0000", 5, "GBP");
+        seedPricedLine("2.0000", 5, "USD");
 
         PurchaseOrder result = recompute();
 
