@@ -1,0 +1,147 @@
+{
+  "description": "The shared money/tolerance fixture referenced by docs/CONTRACT.md (Money section, PI reconciliation section). Source of truth lives here, in the backend repo; shvoy-frontend vendors an exact copy via scripts/sync-money-fixture.mjs. Both test suites (MoneyToleranceFixtureTest here; rounding.test.ts/percentage.test.ts there) assert every case against their own implementation — this is what makes cross-repo divergence fail in CI instead of surfacing during reconciliation with a live supplier. Every rounding case uses HALF_EVEN; every tolerance case uses the EXCLUSIVE boundary (`|variance| < tolerance`); variance is rounded HALF_EVEN to 2dp before it is stored, displayed, or compared — never against a raw value. See CONTRACT.md's Money and 'Tolerance evaluation & auto-confirm (Story 5.4)' sections for the prose.",
+  "rule": {
+    "roundingMode": "HALF_EVEN",
+    "unitPriceScale": 4,
+    "lineTotalScale": 2,
+    "toleranceBoundary": "exclusive",
+    "varianceRoundedBeforeComparison": true,
+    "defaultTolerancePercent": "2.00"
+  },
+  "unitPriceRounding": [
+    { "input": "1.42355", "expected": "1.4236", "note": "exact tie; 1.4236's last digit (6) is even" },
+    { "input": "1.42345", "expected": "1.4234", "note": "exact tie; 1.4234's last digit (4) is even — HALF_UP would have given 1.4235" },
+    { "input": "1.00005", "expected": "1.0000", "note": "exact tie; 1.0000's last digit (0) is even — HALF_UP would have given 1.0001" },
+    { "input": "0.00005", "expected": "0.0000", "note": "exact tie at the smallest unit; even neighbour is zero" },
+    { "input": "0.00125", "expected": "0.0012", "note": "mirrors UnitPriceTest's own case: 0.0012's last digit (2) is even" },
+    { "input": "1.4275", "expected": "1.4275", "note": "already at scale — no rounding occurs" }
+  ],
+  "lineTotalRounding": [
+    { "input": "1.005", "scale": 2, "expected": "1.00", "note": "exact tie; 1.00's last digit (0) is even — HALF_UP would have given 1.01" },
+    { "input": "2.5", "scale": 0, "expected": "2", "note": "exact tie; 2 is even — HALF_UP would have given 3" },
+    { "input": "1.135", "scale": 2, "expected": "1.14", "note": "exact tie; 1.14's last digit (4) is even — same result HALF_UP would give, not a distinguishing case" },
+    { "input": "0.115", "scale": 2, "expected": "0.12", "note": "exact tie; 0.12's last digit (2) is even — same result HALF_UP would give" },
+    { "input": "-1.005", "scale": 2, "expected": "-1.00", "note": "negative tie, sign-symmetric: -1.00's last digit (0) is even — HALF_UP would have given -1.01" }
+  ],
+  "orderTotals": [
+    {
+      "description": "three lines of 0.115 (3dp) — the classic sum-then-round-vs-round-then-sum divergence case",
+      "unroundedLines": ["0.115", "0.115", "0.115"],
+      "roundedLines": ["0.12", "0.12", "0.12"],
+      "correctOrderTotal": "0.36",
+      "wrongOrderTotal_roundedSumOfUnrounded": "0.34",
+      "note": "unrounded sum is 0.345, an exact tie at 2dp — HALF_EVEN picks 0.34 (even), widening the divergence from the HALF_UP fixture's 0.35"
+    },
+    {
+      "description": "a typical PO with three distinct line items, two of which are themselves exact HALF_EVEN ties",
+      "unroundedLines": ["12.3450", "8.9950", "100.0025"],
+      "roundedLines": ["12.34", "9.00", "100.00"],
+      "correctOrderTotal": "121.34",
+      "note": "12.3450 is a tie resolved to 12.34 (even); 8.9950 is a tie resolved to 9.00 (even); 100.0025 isn't a tie and rounds down"
+    }
+  ],
+  "depositBalanceSplit": [
+    {
+      "description": "classic 30/70 split of an odd amount — no tie, deposit rounds down normally",
+      "total": "100.01",
+      "depositPercentage": "30.0",
+      "expectedDeposit": "30.00",
+      "expectedBalance": "70.01",
+      "note": "deposit = round(100.01 * 0.30, HALF_EVEN, 2dp) = 30.00 (30.003, not a tie); balance = total - deposit, never independently rounded"
+    },
+    {
+      "description": "an exact tie in the deposit calculation itself — the tiebreak case",
+      "total": "50.05",
+      "depositPercentage": "50.0",
+      "expectedDeposit": "25.02",
+      "expectedBalance": "25.03",
+      "note": "ideal deposit is 25.025, an exact tie between 25.02 and 25.03 — HALF_EVEN picks 25.02 (even). A naive 'round half up' or 'largest remainder, ties to first ratio' split would give 25.03/25.02 instead — this is the case that tells the two algorithms apart. There is no independent tiebreak rule for the balance: it always simply absorbs whatever the total minus the (already-decided) deposit leaves."
+    },
+    {
+      "description": "negative total, reachable via the credit ledger — same rule, sign carried through",
+      "total": "-100.01",
+      "depositPercentage": "30.0",
+      "expectedDeposit": "-30.00",
+      "expectedBalance": "-70.01",
+      "note": "mirrors the first case exactly with both parts negated; HALF_EVEN's tie-breaking is sign-symmetric so the same rounding decision applies to the magnitude regardless of sign"
+    }
+  ],
+  "varianceTolerance": [
+    {
+      "description": "well within tolerance, no rounding drama",
+      "poUnitPrice": "100.0000", "poQuantity": 10,
+      "piUnitPrice": "100.0000", "piQuantity": 10,
+      "tolerancePercent": "2.00",
+      "expectedVariancePercent": "0.00",
+      "withinTolerance": true
+    },
+    {
+      "description": "one hundredth below the boundary — auto-confirms",
+      "poUnitPrice": "100.0000", "poQuantity": 10,
+      "piUnitPrice": "101.9900", "piQuantity": 10,
+      "tolerancePercent": "2.00",
+      "expectedVariancePercent": "1.99",
+      "withinTolerance": true
+    },
+    {
+      "description": "exactly at the boundary — EXCLUSIVE, so this routes to approval, not auto-confirm",
+      "poUnitPrice": "100.0000", "poQuantity": 10,
+      "piUnitPrice": "102.0000", "piQuantity": 10,
+      "tolerancePercent": "2.00",
+      "expectedVariancePercent": "2.00",
+      "withinTolerance": false
+    },
+    {
+      "description": "one hundredth above the boundary — routes",
+      "poUnitPrice": "100.0000", "poQuantity": 10,
+      "piUnitPrice": "102.0100", "piQuantity": 10,
+      "tolerancePercent": "2.00",
+      "expectedVariancePercent": "2.01",
+      "withinTolerance": false
+    },
+    {
+      "description": "negative equivalent of the boundary case — a decrease of the same magnitude also routes (symmetric test)",
+      "poUnitPrice": "100.0000", "poQuantity": 10,
+      "piUnitPrice": "98.0000", "piQuantity": 10,
+      "tolerancePercent": "2.00",
+      "expectedVariancePercent": "-2.00",
+      "withinTolerance": false
+    },
+    {
+      "description": "negative equivalent, one hundredth inside — auto-confirms",
+      "poUnitPrice": "100.0000", "poQuantity": 10,
+      "piUnitPrice": "98.0100", "piQuantity": 10,
+      "tolerancePercent": "2.00",
+      "expectedVariancePercent": "-1.99",
+      "withinTolerance": true
+    },
+    {
+      "description": "round-before-compare: the raw variance is genuinely below tolerance, but HALF_EVEN rounding of an exact tie pushes it to exactly the boundary, which then routes — deliberate, shipped behaviour, not a defect. A comparison against the raw 1.9950 would wrongly auto-confirm.",
+      "poUnitPrice": "100.0000", "poQuantity": 10,
+      "piUnitPrice": "101.9950", "piQuantity": 10,
+      "rawVariancePercent": "1.9950",
+      "tolerancePercent": "2.00",
+      "expectedVariancePercent": "2.00",
+      "withinTolerance": false
+    },
+    {
+      "description": "the same rounding-tie mechanism, resolving downward instead of upward — proves the mode is HALF_EVEN in both directions, not 'rounds up on ties'",
+      "poUnitPrice": "100.0000", "poQuantity": 10,
+      "piUnitPrice": "101.9850", "piQuantity": 10,
+      "rawVariancePercent": "1.9850",
+      "tolerancePercent": "2.00",
+      "expectedVariancePercent": "1.98",
+      "withinTolerance": true
+    },
+    {
+      "description": "quantity moves independently of unit price and never contributes to the unit-price variance (UNIT_PRICE basis)",
+      "poUnitPrice": "100.0000", "poQuantity": 10,
+      "piUnitPrice": "100.0000", "piQuantity": 25,
+      "tolerancePercent": "2.00",
+      "expectedVariancePercent": "0.00",
+      "withinTolerance": true,
+      "expectedQuantityVariancePercent": "150.00",
+      "expectedQuantityVarianceAbs": 15
+    }
+  ]
+}
