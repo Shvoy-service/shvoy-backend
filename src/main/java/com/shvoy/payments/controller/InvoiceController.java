@@ -14,11 +14,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.validation.Valid;
 
+import com.shvoy.payments.dto.InvoiceMatchResultResponse;
 import com.shvoy.payments.dto.InvoiceResponse;
 import com.shvoy.payments.dto.LogInvoiceRequest;
 import com.shvoy.payments.dto.RunningPositionResponse;
 import com.shvoy.payments.service.InvoiceService;
 import com.shvoy.payments.service.RunningPositionService;
+import com.shvoy.payments.service.ThreeWayMatchService;
 
 /**
  * Story 6.4 — log a supplier's final invoice against a PO, and read it back.
@@ -35,10 +37,13 @@ class InvoiceController {
 
     private final InvoiceService invoiceService;
     private final RunningPositionService runningPositionService;
+    private final ThreeWayMatchService threeWayMatchService;
 
-    InvoiceController(InvoiceService invoiceService, RunningPositionService runningPositionService) {
+    InvoiceController(InvoiceService invoiceService, RunningPositionService runningPositionService,
+            ThreeWayMatchService threeWayMatchService) {
         this.invoiceService = invoiceService;
         this.runningPositionService = runningPositionService;
+        this.threeWayMatchService = threeWayMatchService;
     }
 
     @PostMapping("/api/purchase-orders/{poId}/invoices")
@@ -67,6 +72,12 @@ class InvoiceController {
     @GetMapping("/api/purchase-orders/{poId}/running-position")
     RunningPositionResponse runningPosition(@PathVariable UUID poId) {
         return runningPositionService.compute(poId);
+    }
+
+    /** The per-invoice three-way-match verdicts for a PO — strategy outcome + terms-type consequence (6.5 re-spec). */
+    @GetMapping("/api/purchase-orders/{poId}/match-results")
+    List<InvoiceMatchResultResponse> matchResults(@PathVariable UUID poId) {
+        return threeWayMatchService.listResults(poId);
     }
 
     @GetMapping("/api/invoices/{id}")

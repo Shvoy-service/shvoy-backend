@@ -81,6 +81,7 @@ class DiscrepancyResolutionTest {
             jdbcTemplate.update("DELETE FROM credit_ledger_entries WHERE company_id = ?", c);
             jdbcTemplate.update("DELETE FROM invoice_covered_lines WHERE company_id = ?", c);
             // Break the self-referential correction chain (supersedes_invoice_id) before the bulk delete.
+            jdbcTemplate.update("DELETE FROM invoice_match_results WHERE company_id = ?", c);
             jdbcTemplate.update("UPDATE invoices SET supersedes_invoice_id = NULL WHERE company_id = ?", c);
             jdbcTemplate.update("DELETE FROM invoices WHERE company_id = ?", c);
             jdbcTemplate.update("DELETE FROM proforma_invoice_lines WHERE company_id = ?", c);
@@ -282,7 +283,7 @@ class DiscrepancyResolutionTest {
 
     private String invoiceBody(String amount, String claimedCredit, String ref) {
         StringBuilder body = new StringBuilder("{\"invoiceReference\":\"INV\",\"amount\":").append(amount)
-            .append(",\"currency\":\"USD\",\"coversType\":\"AMOUNT\",\"invoiceDate\":\"").append(LocalDate.now())
+            .append(",\"currency\":\"USD\",\"coversType\":\"BALANCE\",\"invoiceDate\":\"").append(LocalDate.now())
             .append("\"");
         if (claimedCredit != null) {
             body.append(",\"claimedCreditAmount\":").append(claimedCredit)

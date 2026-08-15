@@ -67,6 +67,7 @@ class ThreeWayMatchServiceTest {
             jdbcTemplate.update("DELETE FROM payment_grn_projection_lines WHERE company_id = ?", company);
             jdbcTemplate.update("DELETE FROM credit_ledger_audit_events WHERE company_id = ?", company);
             jdbcTemplate.update("DELETE FROM credit_ledger_entries WHERE company_id = ?", company);
+            jdbcTemplate.update("DELETE FROM invoice_match_results WHERE company_id = ?", company);
             jdbcTemplate.update("DELETE FROM invoices WHERE company_id = ?", company);
             jdbcTemplate.update("DELETE FROM proforma_invoice_lines WHERE company_id = ?", company);
             jdbcTemplate.update("DELETE FROM proforma_invoices WHERE company_id = ?", company);
@@ -102,7 +103,7 @@ class ThreeWayMatchServiceTest {
         evaluate(po);
 
         assertThat(statusOf(balance)).isEqualTo("BLOCKED");
-        assertThat(matchDetailOf(balance)).contains("GRN=8");
+        assertThat(matchDetailOf(balance)).contains("Receipt incomplete");
         assertThat(auditCount(po, "MATCH_BLOCKED")).isEqualTo(1);
     }
 
@@ -303,8 +304,8 @@ class ThreeWayMatchServiceTest {
 
     private void insertInvoice(UUID po, String amount, String claimedCredit, String claimedRef, UUID company) {
         jdbcTemplate.update(
-            "INSERT INTO invoices (id, company_id, purchase_order_id, invoice_reference, amount_amount, currency, invoice_date, claimed_credit_amount, claimed_credit_reference, status, active, logged_by, created_at) "
-                + "VALUES (?, ?, ?, ?, ?, 'USD', ?, ?, ?, 'LOGGED', TRUE, ?, ?)",
+            "INSERT INTO invoices (id, company_id, purchase_order_id, invoice_reference, amount_amount, currency, invoice_date, claimed_credit_amount, claimed_credit_reference, covers_type, status, active, logged_by, created_at) "
+                + "VALUES (?, ?, ?, ?, ?, 'USD', ?, ?, ?, 'BALANCE', 'LOGGED', TRUE, ?, ?)",
             UUID.randomUUID(), company, po, "INV-1", new BigDecimal(amount), Date.valueOf(LocalDate.now()),
             claimedCredit == null ? null : new BigDecimal(claimedCredit), claimedRef, userAId,
             Timestamp.from(Instant.now()));

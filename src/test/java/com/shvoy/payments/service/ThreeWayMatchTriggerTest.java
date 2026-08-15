@@ -73,6 +73,7 @@ class ThreeWayMatchTriggerTest {
         CurrentUserContext.clear();
         jdbcTemplate.update("DELETE FROM payment_audit_events WHERE company_id = ?", company);
         jdbcTemplate.update("DELETE FROM payment_grn_projection_lines WHERE company_id = ?", company);
+        jdbcTemplate.update("DELETE FROM invoice_match_results WHERE company_id = ?", company);
         jdbcTemplate.update("DELETE FROM invoices WHERE company_id = ?", company);
         jdbcTemplate.update("DELETE FROM proforma_invoice_lines WHERE company_id = ?", company);
         jdbcTemplate.update("DELETE FROM proforma_invoices WHERE company_id = ?", company);
@@ -96,7 +97,7 @@ class ThreeWayMatchTriggerTest {
         CurrentUserContext.set(userId);
         invoiceService.log(po, new LogInvoiceRequest(
             "INV-1", new BigDecimal("20.00"), "USD", LocalDate.now(), null, null,
-            com.shvoy.payments.domain.InvoiceCoversType.AMOUNT, null, null));
+            com.shvoy.payments.domain.InvoiceCoversType.BALANCE, null, null));
 
         assertThat(statusOf(balance)).isEqualTo("READY_TO_PAY");
     }
@@ -168,8 +169,8 @@ class ThreeWayMatchTriggerTest {
 
     private void seedInvoice(UUID po, String amount) {
         jdbcTemplate.update(
-            "INSERT INTO invoices (id, company_id, purchase_order_id, invoice_reference, amount_amount, currency, invoice_date, status, active, logged_by, created_at) "
-                + "VALUES (?, ?, ?, 'INV-1', ?, 'USD', ?, 'LOGGED', TRUE, ?, ?)",
+            "INSERT INTO invoices (id, company_id, purchase_order_id, invoice_reference, amount_amount, currency, invoice_date, covers_type, status, active, logged_by, created_at) "
+                + "VALUES (?, ?, ?, 'INV-1', ?, 'USD', ?, 'BALANCE', 'LOGGED', TRUE, ?, ?)",
             UUID.randomUUID(), company, po, new BigDecimal(amount), java.sql.Date.valueOf(LocalDate.now()), userId,
             Timestamp.from(Instant.now()));
     }

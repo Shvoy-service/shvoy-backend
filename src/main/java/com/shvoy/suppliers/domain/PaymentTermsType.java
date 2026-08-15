@@ -1,5 +1,7 @@
 package com.shvoy.suppliers.domain;
 
+import org.springframework.modulith.NamedInterface;
+
 /**
  * The confirmed payment-terms model (supplier remodel): a supplier's terms are
  * one of three shapes, not just a deposit percentage.
@@ -15,6 +17,7 @@ package com.shvoy.suppliers.domain;
  *       scope for this remodel.</li>
  * </ul>
  */
+@NamedInterface("payment-terms")
 public enum PaymentTermsType {
     ZERO_DEPOSIT,
     DEPOSIT_BALANCE,
