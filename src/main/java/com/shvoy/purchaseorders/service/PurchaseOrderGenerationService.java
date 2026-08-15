@@ -79,6 +79,7 @@ public class PurchaseOrderGenerationService {
     private final S3Client s3Client;
     private final String documentsBucket;
     private final ApplicationEventPublisher eventPublisher;
+    private final com.shvoy.purchaseorders.repository.PurchaseOrderAuditEventRepository auditRepository;
 
     PurchaseOrderGenerationService(PurchaseOrderService purchaseOrderService,
             PurchaseOrderLineRepository purchaseOrderLineRepository,
@@ -91,7 +92,8 @@ public class PurchaseOrderGenerationService {
             PurchaseOrderDocumentRenderer documentRenderer,
             S3Client s3Client,
             @Value("${aws.s3.documents-bucket}") String documentsBucket,
-            ApplicationEventPublisher eventPublisher) {
+            ApplicationEventPublisher eventPublisher,
+            com.shvoy.purchaseorders.repository.PurchaseOrderAuditEventRepository auditRepository) {
         this.purchaseOrderService = purchaseOrderService;
         this.purchaseOrderLineRepository = purchaseOrderLineRepository;
         this.overrideLineRepository = overrideLineRepository;
@@ -104,6 +106,7 @@ public class PurchaseOrderGenerationService {
         this.s3Client = s3Client;
         this.documentsBucket = documentsBucket;
         this.eventPublisher = eventPublisher;
+        this.auditRepository = auditRepository;
     }
 
     @Transactional
@@ -115,6 +118,14 @@ public class PurchaseOrderGenerationService {
             .filter(line -> line.getPurchaseOrderId().equals(purchaseOrderId))
             .toList();
         assertReadyToGenerate(purchaseOrder, lines);
+
+        // PO-issuance gate: re-check the supplier is still validated (a bank-details change reverts it) — the control.
+        com.shvoy.suppliers.dto.SupplierIssuanceView supplier =
+            supplierService.getIssuanceView(purchaseOrder.getSupplierId());
+        if (!supplier.validated()) {
+            throw new ConflictException(ErrorCode.SUPPLIER_NOT_VALIDATED,
+                "Supplier is no longer validated (its bank details may have changed) — re-validate before generating");
+        }
 
         Optional<PurchaseOrderPriceOverride> override = finalisationGateService.checkFinalisationGate(
             purchaseOrderId, request == null ? null : request.override());
@@ -137,6 +148,16 @@ public class PurchaseOrderGenerationService {
         String s3Key = storeDocument(purchaseOrder, pdf);
 
         purchaseOrder.applyGeneration(CurrentUserContext.get(), s3Key);
+
+        // Advisory (never-blocking) flags: a PO that went out contract-/compliance-pending is a matter of record.
+        boolean contractPending = purchaseOrder.getContractReference() == null
+            || purchaseOrder.getContractReference().isBlank();
+        boolean compliancePending = !supplier.complianceConfirmed();
+        purchaseOrder.stampAdvisoryFlags(contractPending, compliancePending);
+        auditRepository.save(new com.shvoy.purchaseorders.domain.PurchaseOrderAuditEvent(
+            purchaseOrder.getId(), com.shvoy.purchaseorders.domain.PurchaseOrderAuditEventType.ADVISORY_FLAGS_STAMPED,
+            "Generated with contract_pending=" + contractPending + ", compliance_pending=" + compliancePending,
+            CurrentUserContext.get()));
 
         // The deposit/balance amounts are now locked — announce it so the payments module (6.1)
         // can create the payment obligations. Published within this transaction: a synchronous
@@ -174,6 +195,9 @@ public class PurchaseOrderGenerationService {
         }
         if (purchaseOrder.getRequestedEtd() == null) {
             throw new ConflictException(ErrorCode.PO_NOT_READY_TO_GENERATE, "Purchase order has no requested ETD set");
+        }
+        if (purchaseOrder.getIncoterms() == null) {
+            throw new ConflictException(ErrorCode.PO_NOT_READY_TO_GENERATE, "Purchase order has no incoterms set");
         }
     }
 
@@ -220,6 +244,8 @@ public class PurchaseOrderGenerationService {
             supplier.country(),
             supplier.contactEmail(),
             purchaseOrder.getRequestedEtd(),
+            purchaseOrder.getIncoterms() == null ? null : purchaseOrder.getIncoterms().name(),
+            purchaseOrder.getDeliveryAddress(),
             lineItems,
             purchaseOrder.getOrderTotal(),
             purchaseOrder.getDeposit(),

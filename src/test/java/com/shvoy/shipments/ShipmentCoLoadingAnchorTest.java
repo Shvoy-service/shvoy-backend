@@ -90,6 +90,7 @@ class ShipmentCoLoadingAnchorTest {
         jdbcTemplate.update("DELETE FROM payment_audit_events WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM payments WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM purchase_order_lines WHERE company_id = ?", companyA);
+        jdbcTemplate.update("DELETE FROM purchase_order_audit_events WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM purchase_orders WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM po_number_counters WHERE company_id = ?", companyA);
         jdbcTemplate.update("UPDATE suppliers SET current_term_id = NULL, target_term_id = NULL WHERE company_id = ?", companyA);
@@ -189,7 +190,7 @@ class ShipmentCoLoadingAnchorTest {
     private UUID insertBlAnchoredSupplier(String name) {
         UUID id = UUID.randomUUID();
         Timestamp now = Timestamp.from(Instant.now());
-        jdbcTemplate.update("INSERT INTO suppliers (id, name, status, created_at, company_id) VALUES (?, ?, 'ACTIVE', ?, ?)",
+        jdbcTemplate.update("INSERT INTO suppliers (id, name, status, validation_status, default_incoterms, created_at, company_id) VALUES (?, ?, 'ACTIVE', 'VALIDATED', 'FOB', ?, ?)",
             id, name, now, companyA);
         jdbcTemplate.update(
             "INSERT INTO payment_terms (id, company_id, supplier_id, terms_type, deposit_pct, anchor_date_type, days_from_anchor, created_at) "

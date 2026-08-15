@@ -40,6 +40,16 @@
       <p class="label">Requested ETD</p>
       <p class="value" th:text="${#temporals.format(po.requestedEtd, 'dd MMM yyyy')}">01 Jan 2026</p>
     </td>
+  </tr>
+  <tr>
+    <td>
+      <p class="label">Incoterms</p>
+      <p class="value" th:text="${po.incoterms}">FOB</p>
+    </td>
+    <td>
+      <p class="label">Delivery address</p>
+      <p class="value" th:text="${po.deliveryAddress}">—</p>
+    </td>
     <td style="width: 25%;">
       <p class="label">Generated</p>
       <p class="value" th:text="${#temporals.format(po.generatedAt, 'dd MMM yyyy')}">01 Jan 2026</p>

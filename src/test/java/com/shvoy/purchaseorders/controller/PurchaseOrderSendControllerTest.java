@@ -78,14 +78,14 @@ class PurchaseOrderSendControllerTest {
         supplierBId = UUID.randomUUID();
         supplierNoEmailId = UUID.randomUUID();
         jdbcTemplate.update(
-            "INSERT INTO suppliers (id, name, status, country, contact_email, created_at, company_id) "
-                + "VALUES (?, ?, 'ACTIVE', ?, ?, ?, ?)",
+            "INSERT INTO suppliers (id, name, status, validation_status, default_incoterms, country, contact_email, created_at, company_id) "
+                + "VALUES (?, ?, 'ACTIVE', 'VALIDATED', 'FOB', ?, ?, ?, ?)",
             supplierAId, "Supplier A", "United Kingdom", "sales@supplier-a.example", now, companyA);
         jdbcTemplate.update(
-            "INSERT INTO suppliers (id, name, status, created_at, company_id) VALUES (?, ?, 'ACTIVE', ?, ?)",
+            "INSERT INTO suppliers (id, name, status, validation_status, default_incoterms, created_at, company_id) VALUES (?, ?, 'ACTIVE', 'VALIDATED', 'FOB', ?, ?)",
             supplierBId, "Supplier B", now, companyB);
         jdbcTemplate.update(
-            "INSERT INTO suppliers (id, name, status, created_at, company_id) VALUES (?, ?, 'ACTIVE', ?, ?)",
+            "INSERT INTO suppliers (id, name, status, validation_status, default_incoterms, created_at, company_id) VALUES (?, ?, 'ACTIVE', 'VALIDATED', 'FOB', ?, ?)",
             supplierNoEmailId, "Supplier No Email", now, companyA);
 
         userAId = UUID.randomUUID();
@@ -104,6 +104,7 @@ class PurchaseOrderSendControllerTest {
         jdbcTemplate.update("DELETE FROM purchase_order_price_overrides WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM payments WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM purchase_order_lines WHERE company_id IN (?, ?)", companyA, companyB);
+        jdbcTemplate.update("DELETE FROM purchase_order_audit_events WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM purchase_orders WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM po_number_counters WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM sku_prices WHERE company_id IN (?, ?)", companyA, companyB);

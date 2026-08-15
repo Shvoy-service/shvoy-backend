@@ -14,6 +14,8 @@ import jakarta.validation.constraints.Size;
 public record SupplierRequest(
     @NotBlank @Size(max = 255) String name,
     @Size(max = 100) String country,
-    @Email @Size(max = 255) String contactEmail
+    @Email @Size(max = 255) String contactEmail,
+    // The supplier's default incoterm code, pre-filled onto new POs (PO-issuance gate). Optional.
+    @Size(max = 10) String defaultIncoterms
 ) {
 }

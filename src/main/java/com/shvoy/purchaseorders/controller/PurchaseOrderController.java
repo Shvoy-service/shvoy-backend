@@ -80,6 +80,22 @@ class PurchaseOrderController {
         return purchaseOrderService.setRequestedEtd(id, request);
     }
 
+    /** Set a draft PO's issuance details — incoterms / contract reference / delivery address / budget code (PO-issuance gate). */
+    @PutMapping("/{id}/details")
+    @PreAuthorize("hasAnyRole('ADMIN', 'PURCHASING')")
+    PurchaseOrderResponse setDetails(@PathVariable UUID id,
+            @Valid @RequestBody com.shvoy.purchaseorders.dto.UpdatePurchaseOrderDetailsRequest request) {
+        return purchaseOrderService.setIssuanceDetails(id, request);
+    }
+
+    /** Clear the advisory flags once the contract reference / compliance cert lands (PO-issuance gate). */
+    @PostMapping("/{id}/advisory-flags/refresh")
+    @PreAuthorize("hasAnyRole('ADMIN', 'PURCHASING')")
+    PurchaseOrderResponse refreshAdvisoryFlags(@PathVariable UUID id,
+            @Valid @RequestBody com.shvoy.purchaseorders.dto.RefreshAdvisoryFlagsRequest request) {
+        return purchaseOrderService.refreshAdvisoryFlags(id, request);
+    }
+
     /** 200 with the cancelled PO, not 204 — same reasoning as SupplierController#deactivate: no follow-up GET needed. */
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAnyRole('ADMIN', 'PURCHASING')")

@@ -85,6 +85,28 @@ public class PurchaseOrder extends TenantScoped {
     @Column(name = "document_s3_key", length = 500)
     private String documentS3Key;
 
+    // --- issuance fields (PO-issuance gate) ---
+
+    @jakarta.persistence.Enumerated(jakarta.persistence.EnumType.STRING)
+    @Column(name = "incoterms", length = 10)
+    private Incoterms incoterms;
+
+    @Column(name = "contract_reference", length = 255)
+    private String contractReference;
+
+    @Column(name = "delivery_address", length = 500)
+    private String deliveryAddress;
+
+    @Column(name = "budget_code", length = 100)
+    private String budgetCode;
+
+    /** Advisory flags stamped at generation (never blocking); cleared when the reference/cert lands. */
+    @Column(name = "contract_pending", nullable = false)
+    private boolean contractPending;
+
+    @Column(name = "compliance_pending", nullable = false)
+    private boolean compliancePending;
+
     protected PurchaseOrder() {
     }
 
@@ -202,6 +224,75 @@ public class PurchaseOrder extends TenantScoped {
 
     public UUID getId() {
         return id;
+    }
+
+    /** Pre-fill the supplier's default incoterm and the company's default delivery address at creation (editable after). */
+    public void applyIssuanceDefaults(Incoterms incoterms, String deliveryAddress) {
+        this.incoterms = incoterms;
+        this.deliveryAddress = deliveryAddress;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Full-replace of the issuance details while still a draft (PO-issuance gate). */
+    public void setIssuanceDetails(Incoterms incoterms, String contractReference, String deliveryAddress,
+            String budgetCode) {
+        this.incoterms = incoterms;
+        this.contractReference = contractReference;
+        this.deliveryAddress = deliveryAddress;
+        this.budgetCode = budgetCode;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Stamp the advisory pending flags at generation (PO-issuance gate) — they never block. */
+    public void stampAdvisoryFlags(boolean contractPending, boolean compliancePending) {
+        this.contractPending = contractPending;
+        this.compliancePending = compliancePending;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Record a contract reference (may arrive post-generation); returns whether it cleared a pending flag. */
+    public boolean recordContractReference(String contractReference) {
+        this.contractReference = contractReference;
+        boolean cleared = contractPending && contractReference != null && !contractReference.isBlank();
+        if (cleared) {
+            this.contractPending = false;
+        }
+        this.updatedAt = Instant.now();
+        return cleared;
+    }
+
+    /** Re-evaluate the compliance flag against the supplier's now-known compliance; returns whether it cleared. */
+    public boolean refreshCompliancePending(boolean complianceConfirmed) {
+        boolean cleared = compliancePending && complianceConfirmed;
+        if (cleared) {
+            this.compliancePending = false;
+        }
+        this.updatedAt = Instant.now();
+        return cleared;
+    }
+
+    public Incoterms getIncoterms() {
+        return incoterms;
+    }
+
+    public String getContractReference() {
+        return contractReference;
+    }
+
+    public String getDeliveryAddress() {
+        return deliveryAddress;
+    }
+
+    public String getBudgetCode() {
+        return budgetCode;
+    }
+
+    public boolean isContractPending() {
+        return contractPending;
+    }
+
+    public boolean isCompliancePending() {
+        return compliancePending;
     }
 
     public UUID getSupplierId() {

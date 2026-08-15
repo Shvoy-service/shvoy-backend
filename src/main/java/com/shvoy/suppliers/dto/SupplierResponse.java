@@ -25,6 +25,7 @@ public record SupplierResponse(
     ComplianceStatus complianceStatus,
     String bankAccountNumberMasked,
     boolean bankDetailsPresent,
+    String defaultIncoterms,
     Instant createdAt,
     Instant updatedAt
 ) {

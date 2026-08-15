@@ -10,6 +10,7 @@ import jakarta.validation.constraints.Size;
  */
 public record UpdateCompanyProfileRequest(
     @Size(max = 500) String registeredAddress,
+    @Size(max = 500) String defaultDeliveryAddress,
     @Size(max = 100) String country,
     @Email @Size(max = 255) String contactEmail,
     @Size(max = 50) String contactPhone,

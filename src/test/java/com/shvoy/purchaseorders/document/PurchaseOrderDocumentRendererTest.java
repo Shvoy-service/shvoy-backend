@@ -30,6 +30,8 @@ class PurchaseOrderDocumentRendererTest {
             "United Kingdom",
             "sales@acme.example",
             LocalDate.of(2026, 3, 15),
+            "FOB",
+            "1 Shipping Lane, Portville",
             List.of(
                 new PurchaseOrderDocumentData.LineItem(
                     "SKU-1", "Widget", 150,
@@ -58,6 +60,8 @@ class PurchaseOrderDocumentRendererTest {
             null,
             null,
             LocalDate.of(2026, 3, 15),
+            "EXW",
+            null,
             List.of(new PurchaseOrderDocumentData.LineItem(
                 "SKU-1", "Widget", 10,
                 new UnitPrice(new BigDecimal("2.0000"), "USD"), null,

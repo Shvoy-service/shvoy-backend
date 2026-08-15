@@ -38,8 +38,8 @@ public class CompanyProfileService {
     @Transactional
     public CompanyProfileResponse updateProfile(UUID companyId, UpdateCompanyProfileRequest request) {
         Company company = resolveOwnCompany(companyId);
-        company.updateProfile(request.registeredAddress(), request.country(), request.contactEmail(),
-            request.contactPhone(), request.registrationNumber());
+        company.updateProfile(request.registeredAddress(), request.defaultDeliveryAddress(), request.country(),
+            request.contactEmail(), request.contactPhone(), request.registrationNumber());
         return toResponse(companyRepository.save(company));
     }
 
@@ -51,7 +51,7 @@ public class CompanyProfileService {
 
     private CompanyProfileResponse toResponse(Company company) {
         return new CompanyProfileResponse(company.getId(), company.getName(), company.getRegisteredAddress(),
-            company.getCountry(), company.getContactEmail(), company.getContactPhone(),
-            company.getRegistrationNumber(), company.getCreatedAt(), company.getUpdatedAt());
+            company.getDefaultDeliveryAddress(), company.getCountry(), company.getContactEmail(),
+            company.getContactPhone(), company.getRegistrationNumber(), company.getCreatedAt(), company.getUpdatedAt());
     }
 }
