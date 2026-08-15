@@ -23,6 +23,7 @@ public record ConsignmentResponse(
     String inspectionReportOutcome,
     String inspectionReportS3Key,
     ReceiptStatus receiptStatus,
+    boolean receiptEligible,
     Instant createdAt,
     Instant updatedAt
 ) {

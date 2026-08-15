@@ -1,14 +1,10 @@
 package com.shvoy.shipments.service;
 
 import java.time.LocalDate;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -19,7 +15,6 @@ import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 
 import com.shvoy.NotFoundException;
-import com.shvoy.payments.event.AnchorEventDateKnownEvent;
 import com.shvoy.shipments.domain.Shipment;
 import com.shvoy.shipments.domain.ShipmentConsignment;
 import com.shvoy.shipments.domain.ShipmentDocumentType;
@@ -37,75 +32,62 @@ import com.shvoy.shipments.repository.ShipmentRepository;
  * own transaction) and then publish any anchor dates that became known.
  *
  * <p><strong>The anchor-date chain — the reason this story matters.</strong>
- * After a BL/ex-factory date is recorded, this service publishes an {@link
- * AnchorEventDateKnownEvent} per affected PO; {@code PaymentDueDateService}
- * (6.2) reacts and fills in the balance due date. It's the first time a real
- * shipment date drives payment timing. Best-effort, exactly as invoice logging
- * treats its trigger: a publish failure never fails the recording. A corrected
- * date re-publishes and 6.2's re-entrancy recalculates and audits.
+ * After a BL/ex-factory date is recorded, this service publishes (via {@link
+ * ShipmentAnchorPublisher}) an anchor event per affected PO; {@code
+ * PaymentDueDateService} (6.2) reacts and fills in the balance due date. It's
+ * the first time a real shipment date drives payment timing. Best-effort: a
+ * publish failure never fails the recording. A corrected date re-publishes and
+ * 6.2's re-entrancy recalculates and audits.
  */
 @Service
 public class ShipmentDocumentService {
 
-    private static final Logger log = LoggerFactory.getLogger(ShipmentDocumentService.class);
-
     private final ShipmentDocumentRecordingService recordingService;
     private final ShipmentRepository shipmentRepository;
     private final ShipmentConsignmentRepository consignmentRepository;
-    private final ApplicationEventPublisher eventPublisher;
+    private final ShipmentAnchorPublisher anchorPublisher;
     private final S3Client s3Client;
     private final String documentsBucket;
 
     ShipmentDocumentService(ShipmentDocumentRecordingService recordingService, ShipmentRepository shipmentRepository,
-            ShipmentConsignmentRepository consignmentRepository, ApplicationEventPublisher eventPublisher,
+            ShipmentConsignmentRepository consignmentRepository, ShipmentAnchorPublisher anchorPublisher,
             S3Client s3Client, @Value("${aws.s3.documents-bucket}") String documentsBucket) {
         this.recordingService = recordingService;
         this.shipmentRepository = shipmentRepository;
         this.consignmentRepository = consignmentRepository;
-        this.eventPublisher = eventPublisher;
+        this.anchorPublisher = anchorPublisher;
         this.s3Client = s3Client;
         this.documentsBucket = documentsBucket;
     }
 
     public ShipmentResponse logBillOfLading(UUID purchaseOrderId, String blReference, LocalDate blDate,
             LocalDate exFactoryDate, MultipartFile file) {
-        publishAll(recordingService.recordBillOfLading(purchaseOrderId, blReference, blDate, exFactoryDate, file));
+        anchorPublisher.publishAll(
+            recordingService.recordBillOfLading(purchaseOrderId, blReference, blDate, exFactoryDate, file));
         return getShipmentForPurchaseOrder(purchaseOrderId);
     }
 
     public ShipmentResponse logPackingList(UUID purchaseOrderId, String reference, LocalDate date, MultipartFile file) {
-        publishAll(recordingService.recordPackingList(purchaseOrderId, reference, date, file));
+        anchorPublisher.publishAll(recordingService.recordPackingList(purchaseOrderId, reference, date, file));
         return getShipmentForPurchaseOrder(purchaseOrderId);
     }
 
     public ShipmentResponse logInspectionReport(UUID purchaseOrderId, String reference, LocalDate date, String outcome,
             MultipartFile file) {
-        publishAll(recordingService.recordInspectionReport(purchaseOrderId, reference, date, outcome, file));
+        anchorPublisher.publishAll(
+            recordingService.recordInspectionReport(purchaseOrderId, reference, date, outcome, file));
         return getShipmentForPurchaseOrder(purchaseOrderId);
-    }
-
-    /**
-     * Publish each anchor date to the 6.2 seam. Best-effort per publication so a
-     * downstream failure can't fail (or roll back) the committed document — same
-     * posture as {@code InvoiceService#log}.
-     */
-    private void publishAll(List<AnchorPublication> publications) {
-        for (AnchorPublication publication : publications) {
-            try {
-                eventPublisher.publishEvent(new AnchorEventDateKnownEvent(
-                    publication.purchaseOrderId(), publication.anchorEvent(), publication.anchorDate()));
-            } catch (RuntimeException e) {
-                log.warn("Anchor-date publish failed for PO {} ({} = {}) — document remains logged",
-                    publication.purchaseOrderId(), publication.anchorEvent(), publication.anchorDate(), e);
-            }
-        }
     }
 
     @Transactional(readOnly = true)
     public ShipmentResponse getShipmentForPurchaseOrder(UUID purchaseOrderId) {
         ShipmentConsignment consignment = findConsignment(purchaseOrderId);
         Shipment shipment = findShipment(consignment.getShipmentId());
-        return toResponse(shipment, consignment);
+        int siblings = (int) consignmentRepository.findAll().stream()
+            .filter(c -> c.getShipmentId().equals(shipment.getId()) && !c.isDetached())
+            .filter(c -> !c.getId().equals(consignment.getId()))
+            .count();
+        return toResponse(shipment, consignment, siblings);
     }
 
     /** Retrieve a stored document's bytes for download. 404 if no shipment exists for the PO, or the document hasn't been logged. */
@@ -128,7 +110,7 @@ public class ShipmentDocumentService {
 
     private ShipmentConsignment findConsignment(UUID purchaseOrderId) {
         Optional<ShipmentConsignment> consignment = consignmentRepository.findAll().stream()
-            .filter(c -> c.getPurchaseOrderId().equals(purchaseOrderId))
+            .filter(c -> c.getPurchaseOrderId().equals(purchaseOrderId) && !c.isDetached())
             .findFirst();
         return consignment.orElseThrow(() -> new NotFoundException("No shipment for this purchase order"));
     }
@@ -138,7 +120,7 @@ public class ShipmentDocumentService {
             .orElseThrow(() -> new NotFoundException("Shipment not found"));
     }
 
-    private static ShipmentResponse toResponse(Shipment shipment, ShipmentConsignment consignment) {
+    private static ShipmentResponse toResponse(Shipment shipment, ShipmentConsignment consignment, int siblingCount) {
         ConsignmentResponse consignmentResponse = new ConsignmentResponse(
             consignment.getId(),
             consignment.getPurchaseOrderId(),
@@ -150,6 +132,7 @@ public class ShipmentDocumentService {
             consignment.getInspectionReportOutcome(),
             consignment.getInspectionReportS3Key(),
             consignment.getReceiptStatus(),
+            consignment.isReceiptEligible(),
             consignment.getCreatedAt(),
             consignment.getUpdatedAt());
         return new ShipmentResponse(
@@ -159,6 +142,8 @@ public class ShipmentDocumentService {
             shipment.getExFactoryDate(),
             shipment.getBlDocumentS3Key(),
             consignmentResponse,
+            siblingCount > 0,
+            siblingCount,
             shipment.getCreatedAt(),
             shipment.getUpdatedAt());
     }
