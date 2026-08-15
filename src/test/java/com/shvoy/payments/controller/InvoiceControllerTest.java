@@ -70,6 +70,7 @@ class InvoiceControllerTest {
         jdbcTemplate.update("DELETE FROM payment_audit_events WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM payments WHERE company_id IN (?, ?)", companyA, companyB);
         // Break the self-referential correction chain (supersedes_invoice_id) before the bulk delete.
+        jdbcTemplate.update("DELETE FROM invoice_match_results WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("UPDATE invoices SET supersedes_invoice_id = NULL WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM invoice_covered_lines WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM invoices WHERE company_id IN (?, ?)", companyA, companyB);

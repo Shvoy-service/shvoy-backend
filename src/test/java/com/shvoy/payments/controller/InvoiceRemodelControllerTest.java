@@ -78,6 +78,7 @@ class InvoiceRemodelControllerTest {
         jdbcTemplate.update("DELETE FROM payment_grn_projection_lines WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM payments WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM invoice_covered_lines WHERE company_id = ?", companyA);
+        jdbcTemplate.update("DELETE FROM invoice_match_results WHERE company_id = ?", companyA);
         jdbcTemplate.update("UPDATE invoices SET supersedes_invoice_id = NULL WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM invoices WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM purchase_order_lines WHERE company_id = ?", companyA);

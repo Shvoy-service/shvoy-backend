@@ -108,6 +108,17 @@ public class PaymentTermsService {
             .map(term -> new PaymentScheduleTerms(term.getAnchorDateType(), term.getDaysFromAnchor()));
     }
 
+    /**
+     * The 6.5 re-spec's cross-module surface — the current term's <em>type</em>, which
+     * decides what a match verdict <em>does</em> (per-PO payment gating for
+     * deposit/balance &amp; zero-deposit; record-only feeding the statement view
+     * for rolling). Empty when the supplier has no current term.
+     */
+    @Transactional(readOnly = true)
+    public Optional<PaymentTermsType> getEffectiveTermsType(UUID supplierId) {
+        return currentTerm(supplierId).map(PaymentTerms::getTermsType);
+    }
+
     // --- internals ---
 
     private Optional<PaymentTerms> currentTerm(UUID supplierId) {
