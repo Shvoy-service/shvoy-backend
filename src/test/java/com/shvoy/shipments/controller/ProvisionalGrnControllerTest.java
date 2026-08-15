@@ -107,6 +107,8 @@ class ProvisionalGrnControllerTest {
 
     @AfterEach
     void cleanUp() {
+        // Creating a provisional GRN publishes an event that payments projects (6.5) — clean that up first (FK to purchase_orders).
+        jdbcTemplate.update("DELETE FROM payment_grn_projection_lines WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM shipment_goods_receipt_lines WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM shipment_packing_list_lines WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM shipment_document_audit_events WHERE company_id IN (?, ?)", companyA, companyB);

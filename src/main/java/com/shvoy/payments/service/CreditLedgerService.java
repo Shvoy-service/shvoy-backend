@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -43,12 +44,15 @@ public class CreditLedgerService {
     private final CreditLedgerEntryRepository creditLedgerEntryRepository;
     private final PurchaseOrderService purchaseOrderService;
     private final CreditLedgerAuditService auditService;
+    private final ApplicationEventPublisher eventPublisher;
 
     CreditLedgerService(CreditLedgerEntryRepository creditLedgerEntryRepository,
-            PurchaseOrderService purchaseOrderService, CreditLedgerAuditService auditService) {
+            PurchaseOrderService purchaseOrderService, CreditLedgerAuditService auditService,
+            ApplicationEventPublisher eventPublisher) {
         this.creditLedgerEntryRepository = creditLedgerEntryRepository;
         this.purchaseOrderService = purchaseOrderService;
         this.auditService = auditService;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -65,6 +69,8 @@ public class CreditLedgerService {
             request.ncrReference(), request.targetInvoiceId(), actor));
         auditService.record(entry.getId(), CreditLedgerAuditEventType.LOGGED, actor,
             "Logged " + request.cause() + " credit of " + amount.amount() + " " + amount.currency());
+        // A new open credit may satisfy an invoice's claim that previously blocked the match (6.5).
+        eventPublisher.publishEvent(new MatchInputChangedEvent(request.purchaseOrderId()));
         return toResponse(entry);
     }
 
@@ -130,6 +136,25 @@ public class CreditLedgerService {
         auditService.record(entry.getId(), CreditLedgerAuditEventType.APPLIED, CurrentUserContext.get(),
             "Applied against invoice " + invoiceId);
         return toResponse(entry);
+    }
+
+    /**
+     * Whether the claim is <em>already satisfied</em> by an entry this same
+     * invoice previously applied — the re-entrancy guard for the three-way match
+     * (6.5). A passing match applies the OPEN entry ({@code OPEN → APPLIED}); if
+     * the match then re-runs (a GRN amendment, a re-confirmed PI), {@link
+     * #checkClaim} would no longer see an OPEN entry and the claim would
+     * spuriously look unmatched. This confirms the credit was legitimately
+     * consumed by this very invoice, so the re-run stays a pass and never
+     * re-applies. Read-only.
+     */
+    @Transactional(readOnly = true)
+    public boolean claimAlreadyAppliedToInvoice(UUID purchaseOrderId, Money claimedAmount, UUID invoiceId) {
+        return creditLedgerEntryRepository.findAll().stream()
+            .filter(entry -> entry.getStatus() == CreditLedgerStatus.APPLIED)
+            .filter(entry -> entry.getPurchaseOrderId().equals(purchaseOrderId))
+            .filter(entry -> invoiceId.equals(entry.getTargetInvoiceId()))
+            .anyMatch(entry -> amountsEqual(entry.getAmount(), claimedAmount));
     }
 
     @Transactional

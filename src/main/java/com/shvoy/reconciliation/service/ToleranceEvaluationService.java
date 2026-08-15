@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -12,6 +13,7 @@ import com.shvoy.TenantGuard;
 import com.shvoy.reconciliation.domain.ProformaInvoice;
 import com.shvoy.reconciliation.domain.Reconciliation;
 import com.shvoy.reconciliation.domain.ReconciliationFindingType;
+import com.shvoy.reconciliation.event.ProformaInvoiceConfirmedEvent;
 import com.shvoy.reconciliation.domain.ReconciliationLine;
 import com.shvoy.reconciliation.domain.ReconciliationAuditEventType;
 import com.shvoy.reconciliation.domain.ReconciliationOutcome;
@@ -44,18 +46,21 @@ public class ToleranceEvaluationService {
     private final ProformaInvoiceRepository proformaInvoiceRepository;
     private final ToleranceService toleranceService;
     private final ReconciliationAuditService reconciliationAuditService;
+    private final ApplicationEventPublisher eventPublisher;
 
     ToleranceEvaluationService(
             ReconciliationRepository reconciliationRepository,
             ReconciliationLineRepository reconciliationLineRepository,
             ProformaInvoiceRepository proformaInvoiceRepository,
             ToleranceService toleranceService,
-            ReconciliationAuditService reconciliationAuditService) {
+            ReconciliationAuditService reconciliationAuditService,
+            ApplicationEventPublisher eventPublisher) {
         this.reconciliationRepository = reconciliationRepository;
         this.reconciliationLineRepository = reconciliationLineRepository;
         this.proformaInvoiceRepository = proformaInvoiceRepository;
         this.toleranceService = toleranceService;
         this.reconciliationAuditService = reconciliationAuditService;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -123,5 +128,9 @@ public class ToleranceEvaluationService {
             proformaInvoice.markRoutedForApproval();
         }
         proformaInvoiceRepository.save(proformaInvoice);
+        if (outcome == ReconciliationOutcome.AUTO_CONFIRMED) {
+            // The confirmed-PI leg of the three-way match is now available (Story 6.5).
+            eventPublisher.publishEvent(new ProformaInvoiceConfirmedEvent(proformaInvoice.getPurchaseOrderId()));
+        }
     }
 }
