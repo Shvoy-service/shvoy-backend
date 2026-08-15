@@ -26,6 +26,7 @@ import com.shvoy.purchaseorders.dto.CreatePurchaseOrderRequest;
 import com.shvoy.purchaseorders.dto.PurchaseOrderLineResponse;
 import com.shvoy.purchaseorders.dto.PurchaseOrderReconciliationLine;
 import com.shvoy.purchaseorders.dto.PurchaseOrderReconciliationView;
+import com.shvoy.purchaseorders.dto.PurchaseOrderSummary;
 import com.shvoy.purchaseorders.dto.PurchaseOrderResponse;
 import com.shvoy.purchaseorders.dto.UpdateRequestedEtdRequest;
 import com.shvoy.purchaseorders.repository.PurchaseOrderLineRepository;
@@ -209,6 +210,18 @@ public class PurchaseOrderService {
     @Transactional(readOnly = true)
     public UUID getCreatedBy(UUID id) {
         return findOwnPurchaseOrder(id).getCreatedBy();
+    }
+
+    /**
+     * Story 6.3's cross-module surface: the PO's display reference and its
+     * supplier, for the payment queue's rows. Never exposes the {@code
+     * PurchaseOrder} itself — same minimal-contract discipline as {@link
+     * #getReconciliationView}/{@link #getCreatedBy}.
+     */
+    @Transactional(readOnly = true)
+    public PurchaseOrderSummary getSummary(UUID id) {
+        PurchaseOrder purchaseOrder = findOwnPurchaseOrder(id);
+        return new PurchaseOrderSummary(purchaseOrder.getId(), purchaseOrder.getPoNumber(), purchaseOrder.getSupplierId());
     }
 
     /** Package-visible: reused by {@link PurchaseOrderLineService} so both services share one ownership check. */
