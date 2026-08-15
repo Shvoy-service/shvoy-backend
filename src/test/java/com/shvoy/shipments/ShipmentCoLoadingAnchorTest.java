@@ -92,6 +92,7 @@ class ShipmentCoLoadingAnchorTest {
         jdbcTemplate.update("DELETE FROM purchase_order_lines WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM purchase_orders WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM po_number_counters WHERE company_id = ?", companyA);
+        jdbcTemplate.update("UPDATE suppliers SET current_term_id = NULL, target_term_id = NULL WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM payment_terms WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM sku_prices WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM skus WHERE company_id = ?", companyA);
@@ -191,9 +192,10 @@ class ShipmentCoLoadingAnchorTest {
         jdbcTemplate.update("INSERT INTO suppliers (id, name, status, created_at, company_id) VALUES (?, ?, 'ACTIVE', ?, ?)",
             id, name, now, companyA);
         jdbcTemplate.update(
-            "INSERT INTO payment_terms (supplier_id, company_id, deposit_percentage, anchor_event, days_offset, created_at) "
-                + "VALUES (?, ?, 0.00, 'BL', 30, ?)",
-            id, companyA, now);
+            "INSERT INTO payment_terms (id, company_id, supplier_id, terms_type, deposit_pct, anchor_date_type, days_from_anchor, created_at) "
+                + "VALUES (?, ?, ?, 'ZERO_DEPOSIT', NULL, 'BL', 30, ?)",
+            id, companyA, id, now);
+        jdbcTemplate.update("UPDATE suppliers SET current_term_id = ? WHERE id = ?", id, id);
         return id;
     }
 

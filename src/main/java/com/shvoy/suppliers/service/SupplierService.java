@@ -147,8 +147,11 @@ public class SupplierService {
         return supplier;
     }
 
-    private static SupplierResponse toResponse(Supplier supplier) {
+    static SupplierResponse toResponse(Supplier supplier) {
         return new SupplierResponse(supplier.getId(), supplier.getName(), supplier.getStatus(),
-            supplier.getCountry(), supplier.getContactEmail(), supplier.getCreatedAt(), supplier.getUpdatedAt());
+            supplier.getCountry(), supplier.getContactEmail(),
+            supplier.getValidationStatus(), supplier.isReadyForValidation(), supplier.getComplianceStatus(),
+            supplier.maskedBankAccountNumber(), supplier.getBankAccountNumber() != null,
+            supplier.getCreatedAt(), supplier.getUpdatedAt());
     }
 }

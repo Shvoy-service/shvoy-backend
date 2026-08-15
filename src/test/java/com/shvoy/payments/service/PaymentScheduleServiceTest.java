@@ -68,6 +68,7 @@ class PaymentScheduleServiceTest {
     void cleanUp() {
         jdbcTemplate.update("DELETE FROM payment_audit_events WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM payments WHERE company_id IN (?, ?)", companyA, companyB);
+        jdbcTemplate.update("UPDATE suppliers SET current_term_id = NULL, target_term_id = NULL WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM payment_terms WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM purchase_orders WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM users WHERE company_id IN (?, ?)", companyA, companyB);
@@ -92,10 +93,13 @@ class PaymentScheduleServiceTest {
     }
 
     private void seedTerms(UUID companyId, UUID supplierId, String depositPct, String anchorEvent, int daysOffset) {
+        boolean zero = new BigDecimal(depositPct).signum() == 0;
         jdbcTemplate.update(
-            "INSERT INTO payment_terms (supplier_id, deposit_percentage, anchor_event, days_offset, created_at, company_id) "
-                + "VALUES (?, ?, ?, ?, ?, ?)",
-            supplierId, new BigDecimal(depositPct), anchorEvent, daysOffset, Timestamp.from(Instant.now()), companyId);
+            "INSERT INTO payment_terms (id, supplier_id, company_id, terms_type, deposit_pct, anchor_date_type, days_from_anchor, created_at) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            supplierId, supplierId, companyId, zero ? "ZERO_DEPOSIT" : "DEPOSIT_BALANCE",
+            zero ? null : new BigDecimal(depositPct), anchorEvent, daysOffset, Timestamp.from(Instant.now()));
+        jdbcTemplate.update("UPDATE suppliers SET current_term_id = ? WHERE id = ?", supplierId, supplierId);
     }
 
     private static Money usd(String amount) {
@@ -172,7 +176,7 @@ class PaymentScheduleServiceTest {
             new PurchaseOrderGeneratedEvent(poAId, supplierAId, generationDate, usd("100.00"), usd("30.00"), usd("70.00"))));
 
         // Change the supplier's terms after the PO was generated.
-        jdbcTemplate.update("UPDATE payment_terms SET days_offset = 90 WHERE supplier_id = ?", supplierAId);
+        jdbcTemplate.update("UPDATE payment_terms SET days_from_anchor = 90 WHERE supplier_id = ?", supplierAId);
 
         // The anchor date resolves the balance against the SNAPSHOTTED offset (30), not the new one (90).
         TenantContext.set(companyA);

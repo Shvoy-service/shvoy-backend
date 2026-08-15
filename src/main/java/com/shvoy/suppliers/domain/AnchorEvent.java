@@ -17,5 +17,12 @@ public enum AnchorEvent {
     BL,
     INVOICE,
     ARRIVAL,
-    EX_FACTORY
+    EX_FACTORY,
+    /**
+     * The rolling-account anchor (supplier remodel): payment is measured from a
+     * statement date, coherent only for {@code ROLLING} terms. Its consuming
+     * behaviour (statement-driven settlement) is the 6.5 re-spec; here it's the
+     * fifth representable anchor.
+     */
+    STATEMENT_DATE
 }

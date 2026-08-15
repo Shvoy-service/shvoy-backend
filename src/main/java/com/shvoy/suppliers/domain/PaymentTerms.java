@@ -8,6 +8,8 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
@@ -15,37 +17,40 @@ import com.shvoy.Money;
 import com.shvoy.TenantScoped;
 
 /**
- * A supplier's payment terms — see Story 3.3. Keyed directly by
- * {@code supplier_id} (no separate generated id, no JPA relationship to
- * Supplier) rather than a derived repository finder, so
- * {@code PaymentTermsRepository.findById(supplierId)} stays a plain
- * inherited JpaRepository method — see PaymentTermsRepository's Javadoc for
- * why that matters at startup.
+ * A payment-terms record (supplier remodel) — no longer keyed by supplier (a
+ * supplier can now hold several over time: a current, a target, and retained
+ * history). A supplier references its {@code current}/{@code target} term by id.
  *
- * Only the deposit percentage is stored; balance is always {@code 100 -
- * deposit} (see {@link #getBalancePercentage}), never an independently
- * stored/validated field — this makes the two out of sync impossible by
- * construction rather than by a sum-to-100 validation rule.
+ * <p>Carries the typed model: {@link PaymentTermsType}, a nullable {@code
+ * depositPct} (populated only for {@code DEPOSIT_BALANCE}, 1dp), a five-value
+ * {@code anchorDateType}, and a signed {@code daysFromAnchor}. Type-consistency
+ * (deposit present iff DEPOSIT_BALANCE, statement anchor only for ROLLING) is
+ * enforced at the service boundary, so the persisted record is always coherent.
  */
 @Entity
 @Table(name = "payment_terms")
 public class PaymentTerms extends TenantScoped {
 
-    private static final BigDecimal ONE_HUNDRED = BigDecimal.valueOf(100);
-
     @Id
-    @Column(name = "supplier_id")
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private UUID id;
+
+    @Column(name = "supplier_id", nullable = false)
     private UUID supplierId;
 
-    @Column(name = "deposit_percentage", nullable = false, precision = 5, scale = 2)
-    private BigDecimal depositPercentage;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "terms_type", nullable = false, length = 20)
+    private PaymentTermsType termsType;
+
+    @Column(name = "deposit_pct", precision = 4, scale = 1)
+    private BigDecimal depositPct;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "anchor_event", nullable = false, length = 20)
-    private AnchorEvent anchorEvent;
+    @Column(name = "anchor_date_type", nullable = false, length = 20)
+    private AnchorEvent anchorDateType;
 
-    @Column(name = "days_offset", nullable = false)
-    private int daysOffset;
+    @Column(name = "days_from_anchor", nullable = false)
+    private int daysFromAnchor;
 
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
@@ -56,56 +61,64 @@ public class PaymentTerms extends TenantScoped {
     protected PaymentTerms() {
     }
 
-    public PaymentTerms(UUID supplierId, BigDecimal depositPercentage, AnchorEvent anchorEvent, int daysOffset) {
+    public PaymentTerms(UUID supplierId, PaymentTermsType termsType, BigDecimal depositPct, AnchorEvent anchorDateType,
+            int daysFromAnchor) {
         this.supplierId = supplierId;
-        this.depositPercentage = depositPercentage;
-        this.anchorEvent = anchorEvent;
-        this.daysOffset = daysOffset;
+        this.termsType = termsType;
+        this.depositPct = depositPct;
+        this.anchorDateType = anchorDateType;
+        this.daysFromAnchor = daysFromAnchor;
         this.createdAt = Instant.now();
     }
 
-    public void update(BigDecimal depositPercentage, AnchorEvent anchorEvent, int daysOffset) {
-        this.depositPercentage = depositPercentage;
-        this.anchorEvent = anchorEvent;
-        this.daysOffset = daysOffset;
+    /** In-place edit of a term slot (current or target) — full-replace PUT semantics. */
+    public void update(PaymentTermsType termsType, BigDecimal depositPct, AnchorEvent anchorDateType,
+            int daysFromAnchor) {
+        this.termsType = termsType;
+        this.depositPct = depositPct;
+        this.anchorDateType = anchorDateType;
+        this.daysFromAnchor = daysFromAnchor;
         this.updatedAt = Instant.now();
     }
 
     /**
-     * The allocation-remainder rule (Story 3.3): the deposit is rounded
-     * (HALF_EVEN at scale 2, via {@link Money#multiply}, matching
-     * docs/CONTRACT.md's Money rounding rule) and the balance absorbs
-     * whatever's left — {@code total.minus(deposit)}, not independently
-     * rounded. This guarantees {@code deposit.plus(balance)} always equals
-     * {@code total} exactly, with any odd penny falling on the balance.
-     * Feature 7 calls this against a real order total; nothing here is
-     * wired to an endpoint yet.
+     * The deposit/balance split of {@code total} (Story 4.3's rule, preserved):
+     * the deposit is rounded HALF_EVEN at scale 2 and the balance absorbs the
+     * remainder, so {@code deposit + balance == total} exactly. A null deposit
+     * ({@code ZERO_DEPOSIT}/{@code ROLLING}) means a zero deposit and a
+     * full-total balance — rolling's per-PO behaviour is deferred to the 6.5
+     * re-spec; representing it as a single balance keeps 6.1 unchanged.
      */
     public PaymentSplit split(Money total) {
-        BigDecimal depositFraction = depositPercentage.divide(ONE_HUNDRED);
-        Money deposit = total.multiply(depositFraction);
-        Money balance = total.minus(deposit);
-        return new PaymentSplit(deposit, balance);
+        if (depositPct == null) {
+            return new PaymentSplit(Money.zero(total.currency()), total);
+        }
+        Money deposit = total.multiply(depositPct.divide(BigDecimal.valueOf(100)));
+        return new PaymentSplit(deposit, total.minus(deposit));
+    }
+
+    public UUID getId() {
+        return id;
     }
 
     public UUID getSupplierId() {
         return supplierId;
     }
 
-    public BigDecimal getDepositPercentage() {
-        return depositPercentage;
+    public PaymentTermsType getTermsType() {
+        return termsType;
     }
 
-    public BigDecimal getBalancePercentage() {
-        return ONE_HUNDRED.subtract(depositPercentage);
+    public BigDecimal getDepositPct() {
+        return depositPct;
     }
 
-    public AnchorEvent getAnchorEvent() {
-        return anchorEvent;
+    public AnchorEvent getAnchorDateType() {
+        return anchorDateType;
     }
 
-    public int getDaysOffset() {
-        return daysOffset;
+    public int getDaysFromAnchor() {
+        return daysFromAnchor;
     }
 
     public Instant getCreatedAt() {

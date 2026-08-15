@@ -92,7 +92,8 @@ class MoneyToleranceFixtureTest {
         for (DepositSplitCase c : loadFixture().depositBalanceSplit()) {
             Money total = new Money(new BigDecimal(c.total()), CURRENCY);
             PaymentTerms terms = new PaymentTerms(
-                UUID.randomUUID(), new BigDecimal(c.depositPercentage()), AnchorEvent.BL, 30);
+                UUID.randomUUID(), com.shvoy.suppliers.domain.PaymentTermsType.DEPOSIT_BALANCE,
+                new BigDecimal(c.depositPercentage()), AnchorEvent.BL, 30);
 
             PaymentSplit split = terms.split(total);
 

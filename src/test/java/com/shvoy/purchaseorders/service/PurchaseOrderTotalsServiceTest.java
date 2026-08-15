@@ -74,6 +74,7 @@ class PurchaseOrderTotalsServiceTest {
     void cleanUp() {
         jdbcTemplate.update("DELETE FROM purchase_order_lines WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM purchase_orders WHERE company_id = ?", companyA);
+        jdbcTemplate.update("UPDATE suppliers SET current_term_id = NULL, target_term_id = NULL WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM payment_terms WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM skus WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM users WHERE company_id = ?", companyA);
@@ -116,10 +117,13 @@ class PurchaseOrderTotalsServiceTest {
     }
 
     private void seedPaymentTerms(String depositPercentage) {
+        boolean zero = new BigDecimal(depositPercentage).signum() == 0;
         jdbcTemplate.update(
-            "INSERT INTO payment_terms (supplier_id, deposit_percentage, anchor_event, days_offset, created_at, company_id) "
-                + "VALUES (?, ?, 'BL', 30, ?, ?)",
-            supplierId, new BigDecimal(depositPercentage), Timestamp.from(Instant.now()), companyA);
+            "INSERT INTO payment_terms (id, supplier_id, company_id, terms_type, deposit_pct, anchor_date_type, days_from_anchor, created_at) "
+                + "VALUES (?, ?, ?, ?, ?, 'BL', 30, ?)",
+            supplierId, supplierId, companyA, zero ? "ZERO_DEPOSIT" : "DEPOSIT_BALANCE",
+            zero ? null : new BigDecimal(depositPercentage), Timestamp.from(Instant.now()));
+        jdbcTemplate.update("UPDATE suppliers SET current_term_id = ? WHERE id = ?", supplierId, supplierId);
     }
 
     private PurchaseOrder recompute() {
