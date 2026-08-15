@@ -150,11 +150,26 @@ public class PurchaseOrderService {
      */
     @Transactional(readOnly = true)
     public void assertOwnPurchaseOrderReadyForPi(UUID id) {
+        assertFinalised(id, ErrorCode.PO_NOT_READY_FOR_PI, "a PI");
+    }
+
+    /**
+     * Story 6.4's precondition for logging an invoice — same rule as a PI: the
+     * PO must be {@code GENERATED}/{@code SENT}, not {@code DRAFT}. A distinct
+     * code so the UI can say specifically why. Never exposes the {@code
+     * PurchaseOrder}/{@code PurchaseOrderStatus}.
+     */
+    @Transactional(readOnly = true)
+    public void assertOwnPurchaseOrderReadyForInvoice(UUID id) {
+        assertFinalised(id, ErrorCode.PO_NOT_READY_FOR_INVOICE, "an invoice");
+    }
+
+    private void assertFinalised(UUID id, ErrorCode errorCode, String documentNoun) {
         PurchaseOrder purchaseOrder = findOwnPurchaseOrder(id);
         if (purchaseOrder.getStatus() != PurchaseOrderStatus.GENERATED
                 && purchaseOrder.getStatus() != PurchaseOrderStatus.SENT) {
-            throw new ConflictException(ErrorCode.PO_NOT_READY_FOR_PI,
-                "Purchase order is not ready for a PI in status " + purchaseOrder.getStatus());
+            throw new ConflictException(errorCode,
+                "Purchase order is not ready for " + documentNoun + " in status " + purchaseOrder.getStatus());
         }
     }
 
