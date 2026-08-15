@@ -112,6 +112,13 @@ public class ShipmentConsignment extends TenantScoped {
     @Column(name = "detached", nullable = false)
     private boolean detached;
 
+    /** When the provisional GRN was created (Story 7.4) — the actor/timestamp of the DOCUMENTS_PENDING → PROVISIONALLY_RECEIPTED move. */
+    @Column(name = "provisionally_receipted_at")
+    private Instant provisionallyReceiptedAt;
+
+    @Column(name = "provisionally_receipted_by")
+    private UUID provisionallyReceiptedBy;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -170,6 +177,22 @@ public class ShipmentConsignment extends TenantScoped {
         this.updatedAt = Instant.now();
     }
 
+    /**
+     * Create the provisional GRN (Story 7.4): {@code DOCUMENTS_PENDING →
+     * PROVISIONALLY_RECEIPTED}, explicitly <strong>without</strong> requiring
+     * physical arrival. The service enforces the document gate and the from-state
+     * before calling this; the transition guard here is defense-in-depth.
+     */
+    public void receiptProvisionally(UUID receiptedBy) {
+        if (receiptStatus != ReceiptStatus.DOCUMENTS_PENDING) {
+            throw new IllegalStateException("Consignment is not DOCUMENTS_PENDING: " + receiptStatus);
+        }
+        this.receiptStatus = ReceiptStatus.PROVISIONALLY_RECEIPTED;
+        this.provisionallyReceiptedBy = receiptedBy;
+        this.provisionallyReceiptedAt = Instant.now();
+        this.updatedAt = Instant.now();
+    }
+
     public UUID getId() {
         return id;
     }
@@ -224,6 +247,14 @@ public class ShipmentConsignment extends TenantScoped {
 
     public boolean isDetached() {
         return detached;
+    }
+
+    public Instant getProvisionallyReceiptedAt() {
+        return provisionallyReceiptedAt;
+    }
+
+    public UUID getProvisionallyReceiptedBy() {
+        return provisionallyReceiptedBy;
     }
 
     public Instant getCreatedAt() {

@@ -23,11 +23,14 @@ import com.shvoy.NotFoundException;
 import com.shvoy.TenantContext;
 import com.shvoy.ValidationException;
 import com.shvoy.purchaseorders.service.PurchaseOrderService;
+import com.shvoy.shipments.domain.PackingListLine;
 import com.shvoy.shipments.domain.Shipment;
 import com.shvoy.shipments.domain.ShipmentConsignment;
 import com.shvoy.shipments.domain.ShipmentDocumentAuditEvent;
 import com.shvoy.shipments.domain.ShipmentDocumentAuditEventType;
 import com.shvoy.shipments.domain.ShipmentDocumentType;
+import com.shvoy.shipments.dto.SkuQuantityRequest;
+import com.shvoy.shipments.repository.PackingListLineRepository;
 import com.shvoy.shipments.repository.ShipmentConsignmentRepository;
 import com.shvoy.shipments.repository.ShipmentDocumentAuditEventRepository;
 import com.shvoy.shipments.repository.ShipmentRepository;
@@ -60,6 +63,7 @@ class ShipmentDocumentRecordingService {
     private final ShipmentRepository shipmentRepository;
     private final ShipmentConsignmentRepository consignmentRepository;
     private final ShipmentDocumentAuditEventRepository auditRepository;
+    private final PackingListLineRepository packingListLineRepository;
     private final PurchaseOrderService purchaseOrderService;
     private final S3Client s3Client;
     private final String documentsBucket;
@@ -67,11 +71,13 @@ class ShipmentDocumentRecordingService {
     ShipmentDocumentRecordingService(ShipmentRepository shipmentRepository,
             ShipmentConsignmentRepository consignmentRepository,
             ShipmentDocumentAuditEventRepository auditRepository,
+            PackingListLineRepository packingListLineRepository,
             PurchaseOrderService purchaseOrderService, S3Client s3Client,
             @Value("${aws.s3.documents-bucket}") String documentsBucket) {
         this.shipmentRepository = shipmentRepository;
         this.consignmentRepository = consignmentRepository;
         this.auditRepository = auditRepository;
+        this.packingListLineRepository = packingListLineRepository;
         this.purchaseOrderService = purchaseOrderService;
         this.s3Client = s3Client;
         this.documentsBucket = documentsBucket;
@@ -130,7 +136,7 @@ class ShipmentDocumentRecordingService {
 
     @Transactional
     List<AnchorPublication> recordPackingList(UUID purchaseOrderId, String reference, LocalDate date,
-            MultipartFile file) {
+            List<SkuQuantityRequest> lines, MultipartFile file) {
         assertNotBlank("packingListReference", reference);
         UUID actor = CurrentUserContext.get();
         ShipmentConsignment consignment = resolveOrCreateConsignment(purchaseOrderId);
@@ -142,10 +148,12 @@ class ShipmentDocumentRecordingService {
         String newKey = storeInS3(consignment.getShipmentId(), ShipmentDocumentType.PACKING_LIST, file);
         consignment.recordPackingList(reference, date, newKey);
         consignmentRepository.save(consignment);
+        replacePackingListLines(consignment.getId(), lines);
 
         auditDocumentWrite(consignment, purchaseOrderId, first,
             ShipmentDocumentAuditEventType.PACKING_LIST_LOGGED,
-            "Packing list " + reference + (date == null ? "" : " dated " + date),
+            "Packing list " + reference + (date == null ? "" : " dated " + date)
+                + (lines == null ? "" : " (" + lines.size() + " line(s))"),
             "packing-list date", oldDate, date, "packing list", oldKey, actor);
 
         // No anchor: packing-list/inspection dates don't drive payment timing.
@@ -211,6 +219,19 @@ class ShipmentDocumentRecordingService {
         purchaseOrderService.assertOwnPurchaseOrderReadyForShipment(purchaseOrderId);
         Shipment shipment = shipmentRepository.save(new Shipment(null, null, null, null));
         return consignmentRepository.save(new ShipmentConsignment(shipment.getId(), purchaseOrderId));
+    }
+
+    /** Full-replace the consignment's packing-list line quantities (Story 7.4) — the provisional GRN snapshots from these. */
+    private void replacePackingListLines(UUID consignmentId, List<SkuQuantityRequest> lines) {
+        packingListLineRepository.findAll().stream()
+            .filter(line -> line.getConsignmentId().equals(consignmentId))
+            .forEach(packingListLineRepository::delete);
+        if (lines == null) {
+            return;
+        }
+        for (SkuQuantityRequest line : lines) {
+            packingListLineRepository.save(new PackingListLine(consignmentId, line.skuId(), line.quantity()));
+        }
     }
 
     /** Active consignments on a shipment — a BL/ex-factory date fans out over these (a detached PO gets no republish). */

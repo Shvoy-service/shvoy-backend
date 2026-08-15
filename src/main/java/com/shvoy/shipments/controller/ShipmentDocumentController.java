@@ -2,6 +2,7 @@ package com.shvoy.shipments.controller;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
+import java.util.List;
 import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
@@ -16,9 +17,13 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import com.shvoy.ValidationException;
 import com.shvoy.shipments.domain.ShipmentDocumentType;
 import com.shvoy.shipments.dto.ShipmentResponse;
+import com.shvoy.shipments.dto.SkuQuantityRequest;
 import com.shvoy.shipments.service.ShipmentDocumentService;
 
 /**
@@ -38,9 +43,11 @@ import com.shvoy.shipments.service.ShipmentDocumentService;
 class ShipmentDocumentController {
 
     private final ShipmentDocumentService shipmentDocumentService;
+    private final ObjectMapper objectMapper;
 
-    ShipmentDocumentController(ShipmentDocumentService shipmentDocumentService) {
+    ShipmentDocumentController(ShipmentDocumentService shipmentDocumentService, ObjectMapper objectMapper) {
         this.shipmentDocumentService = shipmentDocumentService;
+        this.objectMapper = objectMapper;
     }
 
     @PostMapping(path = "/bill-of-lading", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -63,9 +70,10 @@ class ShipmentDocumentController {
             @PathVariable UUID purchaseOrderId,
             @RequestParam("reference") String reference,
             @RequestParam(value = "date", required = false) String date,
+            @RequestParam(value = "lines", required = false) String lines,
             @RequestParam("file") MultipartFile file) {
         ShipmentResponse response = shipmentDocumentService.logPackingList(
-            purchaseOrderId, reference, parseOptionalDate("date", date), file);
+            purchaseOrderId, reference, parseOptionalDate("date", date), parseLines(lines), file);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
@@ -91,6 +99,18 @@ class ShipmentDocumentController {
     ResponseEntity<byte[]> document(@PathVariable UUID purchaseOrderId, @PathVariable ShipmentDocumentType type) {
         byte[] bytes = shipmentDocumentService.getDocument(purchaseOrderId, type);
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_OCTET_STREAM).body(bytes);
+    }
+
+    /** Packing-list line quantities arrive as a JSON array string in the multipart form; parse to a clean VALIDATION_ERROR. */
+    private List<SkuQuantityRequest> parseLines(String lines) {
+        if (lines == null || lines.isBlank()) {
+            return List.of();
+        }
+        try {
+            return List.of(objectMapper.readValue(lines, SkuQuantityRequest[].class));
+        } catch (JsonProcessingException e) {
+            throw new ValidationException("lines must be a JSON array of {skuId, quantity}");
+        }
     }
 
     private static LocalDate parseDate(String field, String value) {
