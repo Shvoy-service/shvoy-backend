@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import com.shvoy.shipments.domain.GrnProvenance;
 import com.shvoy.shipments.domain.ReceiptStatus;
 
 /**
@@ -12,15 +13,20 @@ import com.shvoy.shipments.domain.ReceiptStatus;
  * does it state. {@code exists} is false while the consignment is still
  * DOCUMENTS_PENDING (documents in, but not yet receipted); true once
  * provisionally receipted, with the snapshotted {@code lines} the three-way
- * match compares. 6.5 itself consumes this via the {@code
- * ProvisionalGoodsReceiptEvent} push (not a cross-module pull — that would make
- * the module graph cyclic), but the shape it reasons about is this one.
+ * match compares. {@code provenance}/{@code qcFailed} carry the inspection
+ * provenance (7.4 revised) — {@code qcFailed} is the flagged, discrepancy-visible
+ * state that a failed inspection produces, and it does <em>not</em> block the
+ * match. 6.5 consumes the quantities via the {@code ProvisionalGoodsReceiptEvent}
+ * push (a cross-module pull would make the module graph cyclic); this is the
+ * shape it reasons about.
  */
 public record GoodsReceiptResponse(
     UUID purchaseOrderId,
     UUID consignmentId,
     boolean exists,
     ReceiptStatus receiptStatus,
+    GrnProvenance provenance,
+    boolean qcFailed,
     UUID receiptedBy,
     Instant receiptedAt,
     List<GoodsReceiptLineResponse> lines

@@ -23,6 +23,8 @@ import com.shvoy.NotFoundException;
 import com.shvoy.TenantContext;
 import com.shvoy.ValidationException;
 import com.shvoy.purchaseorders.service.PurchaseOrderService;
+import com.shvoy.shipments.domain.InspectionOutcome;
+import com.shvoy.shipments.domain.InspectionReport;
 import com.shvoy.shipments.domain.PackingListLine;
 import com.shvoy.shipments.domain.Shipment;
 import com.shvoy.shipments.domain.ShipmentConsignment;
@@ -30,6 +32,7 @@ import com.shvoy.shipments.domain.ShipmentDocumentAuditEvent;
 import com.shvoy.shipments.domain.ShipmentDocumentAuditEventType;
 import com.shvoy.shipments.domain.ShipmentDocumentType;
 import com.shvoy.shipments.dto.SkuQuantityRequest;
+import com.shvoy.shipments.repository.InspectionReportRepository;
 import com.shvoy.shipments.repository.PackingListLineRepository;
 import com.shvoy.shipments.repository.ShipmentConsignmentRepository;
 import com.shvoy.shipments.repository.ShipmentDocumentAuditEventRepository;
@@ -64,6 +67,7 @@ class ShipmentDocumentRecordingService {
     private final ShipmentConsignmentRepository consignmentRepository;
     private final ShipmentDocumentAuditEventRepository auditRepository;
     private final PackingListLineRepository packingListLineRepository;
+    private final InspectionReportRepository inspectionReportRepository;
     private final PurchaseOrderService purchaseOrderService;
     private final S3Client s3Client;
     private final String documentsBucket;
@@ -72,12 +76,14 @@ class ShipmentDocumentRecordingService {
             ShipmentConsignmentRepository consignmentRepository,
             ShipmentDocumentAuditEventRepository auditRepository,
             PackingListLineRepository packingListLineRepository,
+            InspectionReportRepository inspectionReportRepository,
             PurchaseOrderService purchaseOrderService, S3Client s3Client,
             @Value("${aws.s3.documents-bucket}") String documentsBucket) {
         this.shipmentRepository = shipmentRepository;
         this.consignmentRepository = consignmentRepository;
         this.auditRepository = auditRepository;
         this.packingListLineRepository = packingListLineRepository;
+        this.inspectionReportRepository = inspectionReportRepository;
         this.purchaseOrderService = purchaseOrderService;
         this.s3Client = s3Client;
         this.documentsBucket = documentsBucket;
@@ -161,27 +167,60 @@ class ShipmentDocumentRecordingService {
     }
 
     @Transactional
+    /**
+     * Log an inspection (Story 7.4 revised) — repeatable, outcome-driven. Creates
+     * an {@link InspectionReport} history record, caches the latest outcome on the
+     * consignment, and applies the rework-hold lifecycle. No anchor.
+     */
     List<AnchorPublication> recordInspectionReport(UUID purchaseOrderId, String reference, LocalDate date,
-            String outcome, MultipartFile file) {
+            InspectionOutcome outcome, String notes, MultipartFile file) {
         assertNotBlank("inspectionReportReference", reference);
         UUID actor = CurrentUserContext.get();
         ShipmentConsignment consignment = resolveOrCreateConsignment(purchaseOrderId);
 
-        boolean first = consignment.getInspectionReportReference() == null;
-        LocalDate oldDate = consignment.getInspectionReportDate();
-        String oldKey = consignment.getInspectionReportS3Key();
-
         String newKey = storeInS3(consignment.getShipmentId(), ShipmentDocumentType.INSPECTION_REPORT, file);
-        consignment.recordInspectionReport(reference, date, outcome, newKey);
+        inspectionReportRepository.save(
+            new InspectionReport(consignment.getId(), outcome, reference, date, newKey, notes, actor));
+
+        ShipmentConsignment.ReworkTransition transition = consignment.recordInspection(outcome, reference, date, newKey);
         consignmentRepository.save(consignment);
 
-        auditDocumentWrite(consignment, purchaseOrderId, first,
+        audit(consignment.getShipmentId(), consignment.getId(), purchaseOrderId,
             ShipmentDocumentAuditEventType.INSPECTION_REPORT_LOGGED,
-            "Inspection report " + reference + (date == null ? "" : " dated " + date)
-                + (outcome == null ? "" : ", outcome " + outcome),
-            "inspection-report date", oldDate, date, "inspection report", oldKey, actor);
-
+            "Inspection " + reference + " outcome " + outcome + (date == null ? "" : " dated " + date), actor);
+        if (transition == ShipmentConsignment.ReworkTransition.HELD) {
+            audit(consignment.getShipmentId(), consignment.getId(), purchaseOrderId,
+                ShipmentDocumentAuditEventType.REWORK_HELD,
+                "Held at factory for rework — nothing shipped, nothing to receive", actor);
+        } else if (transition == ShipmentConsignment.ReworkTransition.RELEASED) {
+            audit(consignment.getShipmentId(), consignment.getId(), purchaseOrderId,
+                ShipmentDocumentAuditEventType.REWORK_RELEASED, "Re-inspection passed — rework hold released", actor);
+        }
         return List.of();
+    }
+
+    /**
+     * Set or clear the inspection-due flag (Story 7.4 revised) — the one internal
+     * operation, callable by the manual endpoint now and the future scoring
+     * engine. Clearing a set flag waives a control, so a reason is required.
+     */
+    @Transactional
+    void recordInspectionDue(UUID purchaseOrderId, boolean due, String reason) {
+        UUID actor = CurrentUserContext.get();
+        ShipmentConsignment consignment = resolveOrCreateConsignment(purchaseOrderId);
+        boolean clearing = !due && consignment.isInspectionDue();
+        if (clearing && (reason == null || reason.isBlank())) {
+            throw new ValidationException("reason is required to clear inspection-due (it waives a control)");
+        }
+        consignment.setInspectionDue(due);
+        consignmentRepository.save(consignment);
+        if (clearing) {
+            audit(consignment.getShipmentId(), consignment.getId(), purchaseOrderId,
+                ShipmentDocumentAuditEventType.INSPECTION_DUE_CLEARED, "Inspection-due cleared — reason: " + reason, actor);
+        } else {
+            audit(consignment.getShipmentId(), consignment.getId(), purchaseOrderId,
+                ShipmentDocumentAuditEventType.INSPECTION_DUE_SET, "Inspection-due set to " + due, actor);
+        }
     }
 
     /** Shared audit for a per-consignment document: first log, else audit a date correction and/or a file supersession. */

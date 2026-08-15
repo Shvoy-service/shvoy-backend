@@ -12,6 +12,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.shvoy.NotFoundException;
 import com.shvoy.payments.event.ProvisionalGoodsReceiptEvent;
+import com.shvoy.payments.event.QcFailureEvent;
+import com.shvoy.shipments.domain.GrnProvenance;
 import com.shvoy.shipments.domain.ReceiptStatus;
 import com.shvoy.shipments.domain.ShipmentConsignment;
 import com.shvoy.shipments.dto.AmendGoodsReceiptRequest;
@@ -53,7 +55,17 @@ public class ProvisionalGrnService {
     }
 
     public GoodsReceiptResponse create(UUID purchaseOrderId) {
-        publish(recordingService.create(purchaseOrderId));
+        ProvisionalGrnRecordingService.GrnCreationResult result = recordingService.create(purchaseOrderId);
+        publish(result.receiptEvent());
+        if (result.qcFailed()) {
+            // Opens the quality/dispute lane (7.4 revised); best-effort, never fails the committed receipt.
+            try {
+                eventPublisher.publishEvent(new QcFailureEvent(result.purchaseOrderId(), result.consignmentId()));
+            } catch (RuntimeException e) {
+                log.warn("QC-failure publish failed for PO {} — GRN remains recorded (flagged qc_failed)",
+                    result.purchaseOrderId(), e);
+            }
+        }
         return getForPurchaseOrder(purchaseOrderId);
     }
 
@@ -85,6 +97,8 @@ public class ProvisionalGrnService {
             consignment.getId(),
             exists,
             consignment.getReceiptStatus(),
+            consignment.getGrnProvenance(),
+            consignment.getGrnProvenance() == GrnProvenance.QC_FAILED,
             consignment.getProvisionallyReceiptedBy(),
             consignment.getProvisionallyReceiptedAt(),
             lines);

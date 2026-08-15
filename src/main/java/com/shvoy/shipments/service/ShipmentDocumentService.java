@@ -16,6 +16,7 @@ import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 
 import com.shvoy.NotFoundException;
+import com.shvoy.shipments.domain.InspectionOutcome;
 import com.shvoy.shipments.domain.Shipment;
 import com.shvoy.shipments.domain.ShipmentConsignment;
 import com.shvoy.shipments.domain.ShipmentDocumentType;
@@ -75,10 +76,16 @@ public class ShipmentDocumentService {
         return getShipmentForPurchaseOrder(purchaseOrderId);
     }
 
-    public ShipmentResponse logInspectionReport(UUID purchaseOrderId, String reference, LocalDate date, String outcome,
-            MultipartFile file) {
+    public ShipmentResponse logInspectionReport(UUID purchaseOrderId, String reference, LocalDate date,
+            InspectionOutcome outcome, String notes, MultipartFile file) {
         anchorPublisher.publishAll(
-            recordingService.recordInspectionReport(purchaseOrderId, reference, date, outcome, file));
+            recordingService.recordInspectionReport(purchaseOrderId, reference, date, outcome, notes, file));
+        return getShipmentForPurchaseOrder(purchaseOrderId);
+    }
+
+    /** Set/clear the inspection-due flag (Story 7.4 revised) — the seam the future scoring engine also drives. */
+    public ShipmentResponse setInspectionDue(UUID purchaseOrderId, boolean due, String reason) {
+        recordingService.recordInspectionDue(purchaseOrderId, due, reason);
         return getShipmentForPurchaseOrder(purchaseOrderId);
     }
 

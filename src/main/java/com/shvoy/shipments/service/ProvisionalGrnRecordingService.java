@@ -16,6 +16,7 @@ import com.shvoy.ValidationException;
 import com.shvoy.payments.event.ProvisionalGoodsReceiptEvent;
 import com.shvoy.payments.event.ProvisionalGoodsReceiptLine;
 import com.shvoy.shipments.domain.GoodsReceiptLine;
+import com.shvoy.shipments.domain.GrnProvenance;
 import com.shvoy.shipments.domain.PackingListLine;
 import com.shvoy.shipments.domain.ReceiptStatus;
 import com.shvoy.shipments.domain.Shipment;
@@ -65,7 +66,7 @@ class ProvisionalGrnRecordingService {
     }
 
     @Transactional
-    ProvisionalGoodsReceiptEvent create(UUID purchaseOrderId) {
+    GrnCreationResult create(UUID purchaseOrderId) {
         ShipmentConsignment consignment = findActiveConsignment(purchaseOrderId);
         Shipment shipment = findShipment(consignment.getShipmentId());
         gate.assertEligible(shipment, consignment);
@@ -83,12 +84,26 @@ class ProvisionalGrnRecordingService {
                 new GoodsReceiptLine(consignment.getId(), line.getSkuId(), line.getQuantity()));
         }
 
-        consignment.receiptProvisionally(CurrentUserContext.get());
+        GrnProvenance provenance = gate.provenanceFor(consignment);
+        consignment.receiptProvisionally(CurrentUserContext.get(), provenance);
         consignmentRepository.save(consignment);
         audit(consignment, purchaseOrderId, ShipmentDocumentAuditEventType.PROVISIONAL_GRN_CREATED,
-            "Provisional GRN created from packing list (" + packingLines.size() + " line(s)); physical arrival not required");
+            "Provisional GRN created from packing list (" + packingLines.size() + " line(s)), provenance " + provenance
+                + "; physical arrival not required");
 
-        return buildEvent(purchaseOrderId, consignment.getId());
+        boolean qcFailed = provenance == GrnProvenance.QC_FAILED;
+        if (qcFailed) {
+            // The GRN creates anyway; a QC-failure event opens the quality/dispute lane. The match is NOT blocked.
+            audit(consignment, purchaseOrderId, ShipmentDocumentAuditEventType.GRN_QC_FAILED,
+                "GRN created despite a failed inspection — flagged qc_failed; quality dispute runs alongside payment control");
+        }
+        return new GrnCreationResult(buildEvent(purchaseOrderId, consignment.getId()), qcFailed,
+            purchaseOrderId, consignment.getId());
+    }
+
+    /** The events a GRN creation produces: always the receipted event (6.5's trigger), plus a QC-failure flag (7.4 revised). */
+    record GrnCreationResult(ProvisionalGoodsReceiptEvent receiptEvent, boolean qcFailed, UUID purchaseOrderId,
+            UUID consignmentId) {
     }
 
     @Transactional

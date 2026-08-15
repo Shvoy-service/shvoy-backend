@@ -112,6 +112,20 @@ public class ShipmentConsignment extends TenantScoped {
     @Column(name = "detached", nullable = false)
     private boolean detached;
 
+    /**
+     * Whether this consignment is inspection-due (Story 7.4 revised) — a manual
+     * MVP flag applying the Product Risk × Factory Performance cadence by hand;
+     * a scoring engine sets the same flag later. When true, a passed/failed
+     * inspection is mandatory before a GRN. Never set = not due = the no-QC path.
+     */
+    @Column(name = "inspection_due", nullable = false)
+    private boolean inspectionDue;
+
+    /** How the provisional GRN came to be — set at creation (Story 7.4 revised). Null until receipted. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "grn_provenance", length = 30)
+    private GrnProvenance grnProvenance;
+
     /** When the provisional GRN was created (Story 7.4) — the actor/timestamp of the DOCUMENTS_PENDING → PROVISIONALLY_RECEIPTED move. */
     @Column(name = "provisionally_receipted_at")
     private Instant provisionallyReceiptedAt;
@@ -148,13 +162,54 @@ public class ShipmentConsignment extends TenantScoped {
         this.updatedAt = Instant.now();
     }
 
-    /** Records (or corrects) this portion's inspection report — Story 7.2. Outcome stored as stated, no verification here. */
-    public void recordInspectionReport(String reference, LocalDate date, String outcome, String s3Key) {
+    /** Set/clear the inspection-due flag (Story 7.4 revised) — the one interface the future scoring engine will also drive. */
+    public void setInspectionDue(boolean inspectionDue) {
+        this.inspectionDue = inspectionDue;
+        this.updatedAt = Instant.now();
+    }
+
+    /**
+     * Record an inspection (Story 7.4 revised) — repeatable; this caches the
+     * <em>latest</em> outcome (the full history is {@link InspectionReport}) and
+     * applies the rework hold lifecycle:
+     * <ul>
+     *   <li>{@code REWORK_REQUIRED} from {@code DOCUMENTS_PENDING} → holds the
+     *       consignment ({@code REWORK_REQUIRED}): nothing shipped, nothing to
+     *       receive.</li>
+     *   <li>{@code PASS} while held → releases back to {@code DOCUMENTS_PENDING}.</li>
+     *   <li>{@code FAIL}, or any outcome after receipt, changes no status — a
+     *       {@code FAIL} is recorded and drives the GRN's provenance, not a hold.</li>
+     * </ul>
+     * Returns the transition that occurred, for the service to audit.
+     */
+    public ReworkTransition recordInspection(InspectionOutcome outcome, String reference, LocalDate date, String s3Key) {
         this.inspectionReportReference = reference;
         this.inspectionReportDate = date;
-        this.inspectionReportOutcome = outcome;
+        this.inspectionReportOutcome = outcome.name();
         this.inspectionReportS3Key = s3Key;
         this.updatedAt = Instant.now();
+
+        if (outcome == InspectionOutcome.REWORK_REQUIRED && receiptStatus == ReceiptStatus.DOCUMENTS_PENDING) {
+            this.receiptStatus = ReceiptStatus.REWORK_REQUIRED;
+            return ReworkTransition.HELD;
+        }
+        if (outcome == InspectionOutcome.PASS && receiptStatus == ReceiptStatus.REWORK_REQUIRED) {
+            this.receiptStatus = ReceiptStatus.DOCUMENTS_PENDING;
+            return ReworkTransition.RELEASED;
+        }
+        return ReworkTransition.NONE;
+    }
+
+    /** The latest inspection outcome (the cached governing one), or null if none logged. */
+    public InspectionOutcome latestInspectionOutcome() {
+        return inspectionReportOutcome == null ? null : InspectionOutcome.valueOf(inspectionReportOutcome);
+    }
+
+    /** The rework-hold transition a {@link #recordInspection} produced. */
+    public enum ReworkTransition {
+        HELD,
+        RELEASED,
+        NONE
     }
 
     /**
@@ -183,11 +238,12 @@ public class ShipmentConsignment extends TenantScoped {
      * physical arrival. The service enforces the document gate and the from-state
      * before calling this; the transition guard here is defense-in-depth.
      */
-    public void receiptProvisionally(UUID receiptedBy) {
+    public void receiptProvisionally(UUID receiptedBy, GrnProvenance provenance) {
         if (receiptStatus != ReceiptStatus.DOCUMENTS_PENDING) {
             throw new IllegalStateException("Consignment is not DOCUMENTS_PENDING: " + receiptStatus);
         }
         this.receiptStatus = ReceiptStatus.PROVISIONALLY_RECEIPTED;
+        this.grnProvenance = provenance;
         this.provisionallyReceiptedBy = receiptedBy;
         this.provisionallyReceiptedAt = Instant.now();
         this.updatedAt = Instant.now();
@@ -247,6 +303,14 @@ public class ShipmentConsignment extends TenantScoped {
 
     public boolean isDetached() {
         return detached;
+    }
+
+    public boolean isInspectionDue() {
+        return inspectionDue;
+    }
+
+    public GrnProvenance getGrnProvenance() {
+        return grnProvenance;
     }
 
     public Instant getProvisionallyReceiptedAt() {
