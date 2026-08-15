@@ -57,18 +57,64 @@ public class PurchaseOrderService {
     private final PurchaseOrderLineRepository purchaseOrderLineRepository;
     private final PurchaseOrderSendRepository purchaseOrderSendRepository;
     private final SupplierService supplierService;
+    private final com.shvoy.onboarding.service.CompanyDefaultsService companyDefaultsService;
+    private final com.shvoy.purchaseorders.repository.PurchaseOrderAuditEventRepository auditRepository;
     private final PoNumberGenerator poNumberGenerator;
 
     PurchaseOrderService(PurchaseOrderRepository purchaseOrderRepository,
             PurchaseOrderLineRepository purchaseOrderLineRepository,
             PurchaseOrderSendRepository purchaseOrderSendRepository,
             SupplierService supplierService,
+            com.shvoy.onboarding.service.CompanyDefaultsService companyDefaultsService,
+            com.shvoy.purchaseorders.repository.PurchaseOrderAuditEventRepository auditRepository,
             PoNumberGenerator poNumberGenerator) {
         this.purchaseOrderRepository = purchaseOrderRepository;
         this.purchaseOrderLineRepository = purchaseOrderLineRepository;
         this.purchaseOrderSendRepository = purchaseOrderSendRepository;
         this.supplierService = supplierService;
+        this.companyDefaultsService = companyDefaultsService;
+        this.auditRepository = auditRepository;
         this.poNumberGenerator = poNumberGenerator;
+    }
+
+    /** Set a draft PO's issuance details (PO-issuance gate) — incoterms/contract-ref/delivery/budget, full-replace. */
+    @Transactional
+    public PurchaseOrderResponse setIssuanceDetails(UUID id,
+            com.shvoy.purchaseorders.dto.UpdatePurchaseOrderDetailsRequest request) {
+        PurchaseOrder purchaseOrder = findOwnPurchaseOrder(id);
+        assertEditable(purchaseOrder);
+        purchaseOrder.setIssuanceDetails(request.incoterms(), request.contractReference(),
+            request.deliveryAddress(), request.budgetCode());
+        return toResponse(purchaseOrderRepository.save(purchaseOrder));
+    }
+
+    /**
+     * Clear the advisory flags once the loose ends land (PO-issuance gate) —
+     * records a contract reference (clears contract_pending) and re-checks the
+     * supplier's compliance (clears compliance_pending if now confirmed). Works
+     * post-generation (that's when references/certs usually arrive); each cleared
+     * flag is audited.
+     */
+    @Transactional
+    public PurchaseOrderResponse refreshAdvisoryFlags(UUID id,
+            com.shvoy.purchaseorders.dto.RefreshAdvisoryFlagsRequest request) {
+        PurchaseOrder purchaseOrder = findOwnPurchaseOrder(id);
+        if (request.contractReference() != null && purchaseOrder.recordContractReference(request.contractReference())) {
+            audit(purchaseOrder, com.shvoy.purchaseorders.domain.PurchaseOrderAuditEventType.CONTRACT_PENDING_CLEARED,
+                "Contract reference recorded (" + request.contractReference() + ") — contract_pending cleared");
+        }
+        boolean complianceConfirmed = supplierService.getIssuanceView(purchaseOrder.getSupplierId()).complianceConfirmed();
+        if (purchaseOrder.refreshCompliancePending(complianceConfirmed)) {
+            audit(purchaseOrder, com.shvoy.purchaseorders.domain.PurchaseOrderAuditEventType.COMPLIANCE_PENDING_CLEARED,
+                "Supplier compliance now confirmed — compliance_pending cleared");
+        }
+        return toResponse(purchaseOrderRepository.save(purchaseOrder));
+    }
+
+    private void audit(PurchaseOrder purchaseOrder, com.shvoy.purchaseorders.domain.PurchaseOrderAuditEventType type,
+            String detail) {
+        auditRepository.save(new com.shvoy.purchaseorders.domain.PurchaseOrderAuditEvent(
+            purchaseOrder.getId(), type, detail, CurrentUserContext.getOrNull()));
     }
 
     /**
@@ -85,10 +131,31 @@ public class PurchaseOrderService {
      */
     @Transactional
     public PurchaseOrderResponse create(CreatePurchaseOrderRequest request) {
-        supplierService.assertOwnSupplierExists(request.supplierId());
+        // PO-issuance gate: you can't even START a draft against a supplier that isn't validated (fail fast, not
+        // after 20 lines). A supplier that later reverts to PENDING (bank-details change) is re-checked at generation.
+        com.shvoy.suppliers.dto.SupplierIssuanceView supplier = supplierService.getIssuanceView(request.supplierId());
+        if (!supplier.validated()) {
+            throw new ConflictException(ErrorCode.SUPPLIER_NOT_VALIDATED,
+                "Supplier is not validated — it cannot be ordered from until a human validates it");
+        }
         String poNumber = poNumberGenerator.claimNext(TenantContext.get());
         PurchaseOrder purchaseOrder = new PurchaseOrder(request.supplierId(), poNumber, CurrentUserContext.get());
+        // Pre-fill the per-supplier incoterm default and the company delivery address (both editable per order).
+        purchaseOrder.applyIssuanceDefaults(
+            parseIncoterms(supplier.defaultIncoterms()),
+            companyDefaultsService.defaultDeliveryAddress(TenantContext.get()).orElse(null));
         return toResponse(purchaseOrderRepository.save(purchaseOrder));
+    }
+
+    static com.shvoy.purchaseorders.domain.Incoterms parseIncoterms(String code) {
+        if (code == null || code.isBlank()) {
+            return null;
+        }
+        try {
+            return com.shvoy.purchaseorders.domain.Incoterms.valueOf(code);
+        } catch (IllegalArgumentException e) {
+            return null; // a stale/invalid supplier default just means no pre-fill
+        }
     }
 
     /** Newest first; {@code status == null} means unfiltered. No pagination — same pilot-scale call as SupplierService#list. */
@@ -290,6 +357,12 @@ public class PurchaseOrderService {
             purchaseOrder.getPoNumber(),
             purchaseOrder.getStatus(),
             purchaseOrder.getRequestedEtd(),
+            purchaseOrder.getIncoterms(),
+            purchaseOrder.getContractReference(),
+            purchaseOrder.getDeliveryAddress(),
+            purchaseOrder.getBudgetCode(),
+            purchaseOrder.isContractPending(),
+            purchaseOrder.isCompliancePending(),
             purchaseOrder.getCreatedBy(),
             purchaseOrder.getOrderTotal(),
             purchaseOrder.getDeposit(),

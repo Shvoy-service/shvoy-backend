@@ -66,7 +66,7 @@ class PaymentGenerationSeamTest {
         Timestamp now = Timestamp.from(Instant.now());
         jdbcTemplate.update("INSERT INTO companies (id, name, created_at) VALUES (?, ?, ?)", companyA, "Co A", now);
         supplierAId = UUID.randomUUID();
-        jdbcTemplate.update("INSERT INTO suppliers (id, name, status, created_at, company_id) VALUES (?, ?, 'ACTIVE', ?, ?)",
+        jdbcTemplate.update("INSERT INTO suppliers (id, name, status, validation_status, default_incoterms, created_at, company_id) VALUES (?, ?, 'ACTIVE', 'VALIDATED', 'FOB', ?, ?)",
             supplierAId, "Supplier A", now, companyA);
         userAId = UUID.randomUUID();
         jdbcTemplate.update(
@@ -78,6 +78,7 @@ class PaymentGenerationSeamTest {
     void cleanUp() {
         jdbcTemplate.update("DELETE FROM payments WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM purchase_order_lines WHERE company_id = ?", companyA);
+        jdbcTemplate.update("DELETE FROM purchase_order_audit_events WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM purchase_orders WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM po_number_counters WHERE company_id = ?", companyA);
         jdbcTemplate.update("DELETE FROM sku_prices WHERE company_id = ?", companyA);

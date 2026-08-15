@@ -33,6 +33,9 @@ public class Company {
     @Column(name = "registered_address", length = 500)
     private String registeredAddress;
 
+    @Column(name = "default_delivery_address", length = 500)
+    private String defaultDeliveryAddress;
+
     @Column(name = "country", length = 100)
     private String country;
 
@@ -57,9 +60,10 @@ public class Company {
         this.createdAt = Instant.now();
     }
 
-    public void updateProfile(String registeredAddress, String country, String contactEmail,
-            String contactPhone, String registrationNumber) {
+    public void updateProfile(String registeredAddress, String defaultDeliveryAddress, String country,
+            String contactEmail, String contactPhone, String registrationNumber) {
         this.registeredAddress = registeredAddress;
+        this.defaultDeliveryAddress = defaultDeliveryAddress;
         this.country = country;
         this.contactEmail = contactEmail;
         this.contactPhone = contactPhone;
@@ -81,6 +85,10 @@ public class Company {
 
     public String getRegisteredAddress() {
         return registeredAddress;
+    }
+
+    public String getDefaultDeliveryAddress() {
+        return defaultDeliveryAddress;
     }
 
     public String getCountry() {

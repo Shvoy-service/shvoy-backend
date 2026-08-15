@@ -69,10 +69,10 @@ class PurchaseOrderControllerTest {
         supplierAId = UUID.randomUUID();
         supplierBId = UUID.randomUUID();
         jdbcTemplate.update(
-            "INSERT INTO suppliers (id, name, status, created_at, company_id) VALUES (?, ?, 'ACTIVE', ?, ?)",
+            "INSERT INTO suppliers (id, name, status, validation_status, default_incoterms, created_at, company_id) VALUES (?, ?, 'ACTIVE', 'VALIDATED', 'FOB', ?, ?)",
             supplierAId, "Supplier A", now, companyA);
         jdbcTemplate.update(
-            "INSERT INTO suppliers (id, name, status, created_at, company_id) VALUES (?, ?, 'ACTIVE', ?, ?)",
+            "INSERT INTO suppliers (id, name, status, validation_status, default_incoterms, created_at, company_id) VALUES (?, ?, 'ACTIVE', 'VALIDATED', 'FOB', ?, ?)",
             supplierBId, "Supplier B", now, companyB);
 
         userAId = UUID.randomUUID();

@@ -54,7 +54,7 @@ public class SupplierService {
     @Transactional
     public SupplierResponse create(SupplierRequest request) {
         assertNameAvailable(request.name(), null);
-        Supplier supplier = new Supplier(request.name(), request.country(), request.contactEmail());
+        Supplier supplier = new Supplier(request.name(), request.country(), request.contactEmail(), request.defaultIncoterms());
         return toResponse(saveGuardingUniqueness(supplier, request.name()));
     }
 
@@ -82,7 +82,7 @@ public class SupplierService {
     public SupplierResponse update(UUID id, SupplierRequest request) {
         Supplier supplier = findOwnSupplier(id);
         assertNameAvailable(request.name(), id);
-        supplier.updateDetails(request.name(), request.country(), request.contactEmail());
+        supplier.updateDetails(request.name(), request.country(), request.contactEmail(), request.defaultIncoterms());
         return toResponse(saveGuardingUniqueness(supplier, request.name()));
     }
 
@@ -103,6 +103,16 @@ public class SupplierService {
     public SupplierSummary getSummary(UUID id) {
         Supplier supplier = findOwnSupplier(id);
         return new SupplierSummary(supplier.getId(), supplier.getName(), supplier.getCountry(), supplier.getContactEmail());
+    }
+
+    /** The PO-issuance gate's cross-module read (PO-issuance gate) — validation + compliance + default incoterm. */
+    @Transactional(readOnly = true)
+    public com.shvoy.suppliers.dto.SupplierIssuanceView getIssuanceView(UUID id) {
+        Supplier supplier = findOwnSupplier(id);
+        return new com.shvoy.suppliers.dto.SupplierIssuanceView(
+            supplier.getValidationStatus() == com.shvoy.suppliers.domain.SupplierValidationStatus.VALIDATED,
+            supplier.getComplianceStatus() == com.shvoy.suppliers.domain.ComplianceStatus.CONFIRMED,
+            supplier.getDefaultIncoterms());
     }
 
     /**
@@ -151,7 +161,7 @@ public class SupplierService {
         return new SupplierResponse(supplier.getId(), supplier.getName(), supplier.getStatus(),
             supplier.getCountry(), supplier.getContactEmail(),
             supplier.getValidationStatus(), supplier.isReadyForValidation(), supplier.getComplianceStatus(),
-            supplier.maskedBankAccountNumber(), supplier.getBankAccountNumber() != null,
+            supplier.maskedBankAccountNumber(), supplier.getBankAccountNumber() != null, supplier.getDefaultIncoterms(),
             supplier.getCreatedAt(), supplier.getUpdatedAt());
     }
 }

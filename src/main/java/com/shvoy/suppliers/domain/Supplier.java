@@ -52,6 +52,10 @@ public class Supplier extends TenantScoped {
     @Column(name = "contact_email", length = 255)
     private String contactEmail;
 
+    /** The supplier's default incoterm (PO-issuance gate) — pre-filled onto a new PO, editable per order. */
+    @Column(name = "default_incoterms", length = 10)
+    private String defaultIncoterms;
+
     /** The supplier's current/target payment terms (supplier remodel) — loose id refs, not JPA relationships. */
     @Column(name = "current_term_id")
     private UUID currentTermId;
@@ -86,10 +90,11 @@ public class Supplier extends TenantScoped {
     protected Supplier() {
     }
 
-    public Supplier(String name, String country, String contactEmail) {
+    public Supplier(String name, String country, String contactEmail, String defaultIncoterms) {
         this.name = name;
         this.country = country;
         this.contactEmail = contactEmail;
+        this.defaultIncoterms = defaultIncoterms;
         this.status = SupplierStatus.ACTIVE;
         this.validationStatus = SupplierValidationStatus.PENDING;
         this.createdAt = Instant.now();
@@ -174,10 +179,11 @@ public class Supplier extends TenantScoped {
      * update request clears the corresponding column, same convention as
      * Company.updateProfile.
      */
-    public void updateDetails(String name, String country, String contactEmail) {
+    public void updateDetails(String name, String country, String contactEmail, String defaultIncoterms) {
         this.name = name;
         this.country = country;
         this.contactEmail = contactEmail;
+        this.defaultIncoterms = defaultIncoterms;
         this.updatedAt = Instant.now();
     }
 
@@ -209,6 +215,10 @@ public class Supplier extends TenantScoped {
 
     public String getContactEmail() {
         return contactEmail;
+    }
+
+    public String getDefaultIncoterms() {
+        return defaultIncoterms;
     }
 
     public UUID getCurrentTermId() {

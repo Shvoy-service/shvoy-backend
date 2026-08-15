@@ -26,6 +26,8 @@ public record PurchaseOrderDocumentData(
     String supplierCountry,
     String supplierContactEmail,
     LocalDate requestedEtd,
+    String incoterms,
+    String deliveryAddress,
     List<LineItem> lines,
     Money orderTotal,
     Money deposit,

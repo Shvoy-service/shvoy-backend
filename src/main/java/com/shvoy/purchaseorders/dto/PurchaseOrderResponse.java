@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.UUID;
 
 import com.shvoy.Money;
+import com.shvoy.purchaseorders.domain.Incoterms;
 import com.shvoy.purchaseorders.domain.PurchaseOrderStatus;
 
 /**
@@ -34,6 +35,12 @@ public record PurchaseOrderResponse(
     String poNumber,
     PurchaseOrderStatus status,
     LocalDate requestedEtd,
+    Incoterms incoterms,
+    String contractReference,
+    String deliveryAddress,
+    String budgetCode,
+    boolean contractPending,
+    boolean compliancePending,
     UUID createdBy,
     Money orderTotal,
     Money deposit,
