@@ -41,6 +41,8 @@ public record PurchaseOrderResponse(
     String budgetCode,
     boolean contractPending,
     boolean compliancePending,
+    // Receipt rollup & PO closure: cumulative received exceeds ordered on a SKU (interim, holds closure).
+    boolean overDelivered,
     UUID createdBy,
     Money orderTotal,
     Money deposit,
