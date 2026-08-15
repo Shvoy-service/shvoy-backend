@@ -94,6 +94,27 @@ public class Shipment extends TenantScoped {
         this.createdAt = Instant.now();
     }
 
+    /**
+     * Records (or corrects) the Bill of Lading — Story 7.2. Setting {@code blDate}
+     * is what makes the {@code BL} anchor date known; the caller
+     * ({@code ShipmentDocumentRecordingService}) reads the prior values first so
+     * it can audit the change and publish the anchor event. Ex-factory is set
+     * separately (via {@link #recordExFactoryDate}) so omitting it on a BL
+     * correction never silently clears an already-known date.
+     */
+    public void recordBillOfLading(String blReference, LocalDate blDate, String blDocumentS3Key) {
+        this.blReference = blReference;
+        this.blDate = blDate;
+        this.blDocumentS3Key = blDocumentS3Key;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Records (or corrects) the ex-factory date — the {@code EX_FACTORY} anchor (Story 7.2). */
+    public void recordExFactoryDate(LocalDate exFactoryDate) {
+        this.exFactoryDate = exFactoryDate;
+        this.updatedAt = Instant.now();
+    }
+
     public UUID getId() {
         return id;
     }

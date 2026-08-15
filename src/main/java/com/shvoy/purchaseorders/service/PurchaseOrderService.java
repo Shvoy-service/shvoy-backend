@@ -164,6 +164,18 @@ public class PurchaseOrderService {
         assertFinalised(id, ErrorCode.PO_NOT_READY_FOR_INVOICE, "an invoice");
     }
 
+    /**
+     * Story 7.2's precondition for logging a shipment document — same rule as a
+     * PI/invoice: you can't ship a {@code DRAFT}, so the PO must be {@code
+     * GENERATED}/{@code SENT}. A distinct code ({@code PO_NOT_READY_FOR_SHIPMENT})
+     * so the UI can say specifically why. Never exposes the {@code
+     * PurchaseOrder}/{@code PurchaseOrderStatus}.
+     */
+    @Transactional(readOnly = true)
+    public void assertOwnPurchaseOrderReadyForShipment(UUID id) {
+        assertFinalised(id, ErrorCode.PO_NOT_READY_FOR_SHIPMENT, "a shipment");
+    }
+
     private void assertFinalised(UUID id, ErrorCode errorCode, String documentNoun) {
         PurchaseOrder purchaseOrder = findOwnPurchaseOrder(id);
         if (purchaseOrder.getStatus() != PurchaseOrderStatus.GENERATED
