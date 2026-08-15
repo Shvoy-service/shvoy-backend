@@ -40,6 +40,11 @@ public final class CurrentUserContext {
         return userId;
     }
 
+    /** The current user id, or {@code null} if none is set — for audit actors that may be a system action (Story 6.6's auto-resolve). */
+    public static UUID getOrNull() {
+        return CURRENT_USER_ID.get();
+    }
+
     public static void clear() {
         CURRENT_USER_ID.remove();
     }

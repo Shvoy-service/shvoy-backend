@@ -1,6 +1,7 @@
 package com.shvoy.payments.service;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.shvoy.payments.domain.GrnProjectionLine;
@@ -24,7 +25,7 @@ class GrnProjectionService {
         this.grnProjectionLineRepository = grnProjectionLineRepository;
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     void project(ProvisionalGoodsReceiptEvent event) {
         grnProjectionLineRepository.findAll().stream()
             .filter(line -> line.getConsignmentId().equals(event.consignmentId()))

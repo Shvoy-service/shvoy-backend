@@ -87,6 +87,9 @@ public class Payment extends TenantScoped {
     @Column(name = "match_detail", length = 2000)
     private String matchDetail;
 
+    @Column(name = "match_overridden", nullable = false)
+    private boolean matchOverridden;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -151,6 +154,9 @@ public class Payment extends TenantScoped {
      * match that later passes still can't un-hold a payment a person parked.
      */
     public boolean isMatchMutable() {
+        if (matchOverridden) {
+            return false; // a resolver accepted the mismatch (6.6 path c) — a later re-run must not re-block it
+        }
         return status == PaymentStatus.PENDING
             || status == PaymentStatus.BLOCKED
             || status == PaymentStatus.READY_TO_PAY;
@@ -186,6 +192,22 @@ public class Payment extends TenantScoped {
     public void markPayableWithoutMatch() {
         this.status = PaymentStatus.READY_TO_PAY;
         this.updatedAt = Instant.now();
+    }
+
+    /**
+     * A resolver accepted the mismatch as-is (Story 6.6 path c) — force-pass to
+     * READY_TO_PAY despite the match, and mark it overridden so a later re-run
+     * ({@link #isMatchMutable()}) never re-blocks it. The reason and audit live on
+     * the discrepancy case.
+     */
+    public void overrideMatch() {
+        this.status = PaymentStatus.READY_TO_PAY;
+        this.matchOverridden = true;
+        this.updatedAt = Instant.now();
+    }
+
+    public boolean isMatchOverridden() {
+        return matchOverridden;
     }
 
     public UUID getId() {
