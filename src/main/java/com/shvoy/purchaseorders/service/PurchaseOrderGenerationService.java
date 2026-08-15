@@ -10,6 +10,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,6 +28,7 @@ import com.shvoy.NotFoundException;
 import com.shvoy.TenantContext;
 import com.shvoy.UnitPrice;
 import com.shvoy.purchaseorders.document.PurchaseOrderDocumentData;
+import com.shvoy.purchaseorders.event.PurchaseOrderGeneratedEvent;
 import com.shvoy.purchaseorders.document.PurchaseOrderDocumentRenderer;
 import com.shvoy.purchaseorders.domain.PurchaseOrder;
 import com.shvoy.purchaseorders.domain.PurchaseOrderLine;
@@ -75,6 +77,7 @@ public class PurchaseOrderGenerationService {
     private final PurchaseOrderDocumentRenderer documentRenderer;
     private final S3Client s3Client;
     private final String documentsBucket;
+    private final ApplicationEventPublisher eventPublisher;
 
     PurchaseOrderGenerationService(PurchaseOrderService purchaseOrderService,
             PurchaseOrderLineRepository purchaseOrderLineRepository,
@@ -86,7 +89,8 @@ public class PurchaseOrderGenerationService {
             SkuService skuService,
             PurchaseOrderDocumentRenderer documentRenderer,
             S3Client s3Client,
-            @Value("${aws.s3.documents-bucket}") String documentsBucket) {
+            @Value("${aws.s3.documents-bucket}") String documentsBucket,
+            ApplicationEventPublisher eventPublisher) {
         this.purchaseOrderService = purchaseOrderService;
         this.purchaseOrderLineRepository = purchaseOrderLineRepository;
         this.overrideLineRepository = overrideLineRepository;
@@ -98,6 +102,7 @@ public class PurchaseOrderGenerationService {
         this.documentRenderer = documentRenderer;
         this.s3Client = s3Client;
         this.documentsBucket = documentsBucket;
+        this.eventPublisher = eventPublisher;
     }
 
     @Transactional
@@ -131,6 +136,14 @@ public class PurchaseOrderGenerationService {
         String s3Key = storeDocument(purchaseOrder, pdf);
 
         purchaseOrder.applyGeneration(CurrentUserContext.get(), s3Key);
+
+        // The deposit/balance amounts are now locked — announce it so the payments module (6.1)
+        // can create the payment obligations. Published within this transaction: a synchronous
+        // @EventListener runs inline (same thread → TenantContext intact), so payment creation
+        // commits atomically with generation. purchaseorders neither knows nor cares who listens.
+        eventPublisher.publishEvent(new PurchaseOrderGeneratedEvent(
+            purchaseOrder.getId(), purchaseOrder.getOrderTotal(), purchaseOrder.getDeposit(), purchaseOrder.getBalance()));
+
         return purchaseOrderService.toResponse(purchaseOrder);
     }
 
