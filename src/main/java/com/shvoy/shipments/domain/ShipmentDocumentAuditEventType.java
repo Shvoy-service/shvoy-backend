@@ -17,5 +17,9 @@ public enum ShipmentDocumentAuditEventType {
     /** A PO was co-loaded onto an existing shipment as a new consignment (Story 7.3). */
     CONSIGNMENT_ATTACHED,
     /** A mis-linked consignment was detached while still {@code DOCUMENTS_PENDING} (Story 7.3). */
-    CONSIGNMENT_DETACHED
+    CONSIGNMENT_DETACHED,
+    /** A provisional GRN was created for a consignment (Story 7.4). */
+    PROVISIONAL_GRN_CREATED,
+    /** A provisional GRN's received quantities were amended before arrival (Story 7.4). */
+    PROVISIONAL_GRN_AMENDED
 }

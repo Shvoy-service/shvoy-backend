@@ -1,6 +1,7 @@
 package com.shvoy.shipments.service;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -20,6 +21,7 @@ import com.shvoy.shipments.domain.ShipmentConsignment;
 import com.shvoy.shipments.domain.ShipmentDocumentType;
 import com.shvoy.shipments.dto.ConsignmentResponse;
 import com.shvoy.shipments.dto.ShipmentResponse;
+import com.shvoy.shipments.dto.SkuQuantityRequest;
 import com.shvoy.shipments.repository.ShipmentConsignmentRepository;
 import com.shvoy.shipments.repository.ShipmentRepository;
 
@@ -67,8 +69,9 @@ public class ShipmentDocumentService {
         return getShipmentForPurchaseOrder(purchaseOrderId);
     }
 
-    public ShipmentResponse logPackingList(UUID purchaseOrderId, String reference, LocalDate date, MultipartFile file) {
-        anchorPublisher.publishAll(recordingService.recordPackingList(purchaseOrderId, reference, date, file));
+    public ShipmentResponse logPackingList(UUID purchaseOrderId, String reference, LocalDate date,
+            List<SkuQuantityRequest> lines, MultipartFile file) {
+        anchorPublisher.publishAll(recordingService.recordPackingList(purchaseOrderId, reference, date, lines, file));
         return getShipmentForPurchaseOrder(purchaseOrderId);
     }
 
