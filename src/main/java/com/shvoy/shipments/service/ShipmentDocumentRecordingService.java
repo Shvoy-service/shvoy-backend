@@ -203,7 +203,7 @@ class ShipmentDocumentRecordingService {
      */
     private ShipmentConsignment resolveOrCreateConsignment(UUID purchaseOrderId) {
         Optional<ShipmentConsignment> existing = consignmentRepository.findAll().stream()
-            .filter(c -> c.getPurchaseOrderId().equals(purchaseOrderId))
+            .filter(c -> c.getPurchaseOrderId().equals(purchaseOrderId) && !c.isDetached())
             .findFirst();
         if (existing.isPresent()) {
             return existing.get();
@@ -213,9 +213,10 @@ class ShipmentDocumentRecordingService {
         return consignmentRepository.save(new ShipmentConsignment(shipment.getId(), purchaseOrderId));
     }
 
+    /** Active consignments on a shipment — a BL/ex-factory date fans out over these (a detached PO gets no republish). */
     private List<ShipmentConsignment> consignmentsOf(UUID shipmentId) {
         return consignmentRepository.findAll().stream()
-            .filter(c -> c.getShipmentId().equals(shipmentId))
+            .filter(c -> c.getShipmentId().equals(shipmentId) && !c.isDetached())
             .toList();
     }
 

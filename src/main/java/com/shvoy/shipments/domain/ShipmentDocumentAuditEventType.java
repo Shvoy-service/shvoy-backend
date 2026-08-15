@@ -13,5 +13,9 @@ public enum ShipmentDocumentAuditEventType {
     PACKING_LIST_LOGGED,
     INSPECTION_REPORT_LOGGED,
     DOCUMENT_FIELD_CORRECTED,
-    DOCUMENT_FILE_SUPERSEDED
+    DOCUMENT_FILE_SUPERSEDED,
+    /** A PO was co-loaded onto an existing shipment as a new consignment (Story 7.3). */
+    CONSIGNMENT_ATTACHED,
+    /** A mis-linked consignment was detached while still {@code DOCUMENTS_PENDING} (Story 7.3). */
+    CONSIGNMENT_DETACHED
 }

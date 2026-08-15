@@ -102,6 +102,16 @@ public class ShipmentConsignment extends TenantScoped {
     @Column(name = "receipt_status", nullable = false, length = 30)
     private ReceiptStatus receiptStatus;
 
+    /**
+     * Soft-delete flag for a mis-linked co-loaded consignment (Story 7.3). A
+     * detach doesn't hard-delete — the row and its audit trail are retained
+     * (evidence is never destroyed, same posture as a superseded document file);
+     * detached consignments are simply excluded from the active set (views,
+     * duplicate-attach checks, the document find-or-create path).
+     */
+    @Column(name = "detached", nullable = false)
+    private boolean detached;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -137,6 +147,26 @@ public class ShipmentConsignment extends TenantScoped {
         this.inspectionReportDate = date;
         this.inspectionReportOutcome = outcome;
         this.inspectionReportS3Key = s3Key;
+        this.updatedAt = Instant.now();
+    }
+
+    /**
+     * The load-bearing co-loading rule (Story 7.3): <em>each linked PO requires
+     * its <strong>own</strong> packing list before its portion can be
+     * receipted.</em> A sibling consignment's documents never satisfy this — the
+     * predicate reads only this consignment's own packing list. Exposed as a
+     * named, reusable check because 7.4's provisional-GRN gate composes it with
+     * whatever mandatory-document rule the Product Owners settle; the
+     * packing-list-per-portion part is the piece the business rules state
+     * unambiguously, so it's built now.
+     */
+    public boolean isReceiptEligible() {
+        return packingListReference != null;
+    }
+
+    /** Soft-detach a mis-linked consignment while still {@link ReceiptStatus#DOCUMENTS_PENDING} (Story 7.3). Guarded by the service. */
+    public void detach() {
+        this.detached = true;
         this.updatedAt = Instant.now();
     }
 
@@ -190,6 +220,10 @@ public class ShipmentConsignment extends TenantScoped {
 
     public ReceiptStatus getReceiptStatus() {
         return receiptStatus;
+    }
+
+    public boolean isDetached() {
+        return detached;
     }
 
     public Instant getCreatedAt() {
