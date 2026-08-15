@@ -62,9 +62,29 @@ public class ShipmentConsignment extends TenantScoped {
     @Column(name = "purchase_order_id", nullable = false)
     private UUID purchaseOrderId;
 
+    /** This portion's packing list reference (structured field, Story 7.2). Per-consignment (co-loading rule). */
+    @Column(name = "packing_list_reference", length = 100)
+    private String packingListReference;
+
+    /** This portion's packing list date (Story 7.2). Not an anchor date — captured for the record/GRN, not for payment timing. */
+    @Column(name = "packing_list_date")
+    private LocalDate packingListDate;
+
     /** S3 storage for this portion's packing list. Per-consignment, not per-shipment (co-loading rule). Upload flow is 7.2. */
     @Column(name = "packing_list_s3_key", length = 500)
     private String packingListS3Key;
+
+    /** This portion's inspection report reference (Story 7.2). */
+    @Column(name = "inspection_report_reference", length = 100)
+    private String inspectionReportReference;
+
+    /** This portion's inspection report date (Story 7.2). */
+    @Column(name = "inspection_report_date")
+    private LocalDate inspectionReportDate;
+
+    /** The inspection outcome, recorded faithfully as stated — no cross-document verification here (that's the AI layer, Feature 10). */
+    @Column(name = "inspection_report_outcome", length = 50)
+    private String inspectionReportOutcome;
 
     /** S3 storage for this portion's inspection report. Per-consignment; upload flow is 7.2. */
     @Column(name = "inspection_report_s3_key", length = 500)
@@ -103,6 +123,23 @@ public class ShipmentConsignment extends TenantScoped {
         this.createdAt = Instant.now();
     }
 
+    /** Records (or corrects) this portion's packing list — Story 7.2. Not an anchor; status stays {@code DOCUMENTS_PENDING} until 7.4's gate. */
+    public void recordPackingList(String reference, LocalDate date, String s3Key) {
+        this.packingListReference = reference;
+        this.packingListDate = date;
+        this.packingListS3Key = s3Key;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Records (or corrects) this portion's inspection report — Story 7.2. Outcome stored as stated, no verification here. */
+    public void recordInspectionReport(String reference, LocalDate date, String outcome, String s3Key) {
+        this.inspectionReportReference = reference;
+        this.inspectionReportDate = date;
+        this.inspectionReportOutcome = outcome;
+        this.inspectionReportS3Key = s3Key;
+        this.updatedAt = Instant.now();
+    }
+
     public UUID getId() {
         return id;
     }
@@ -115,8 +152,28 @@ public class ShipmentConsignment extends TenantScoped {
         return purchaseOrderId;
     }
 
+    public String getPackingListReference() {
+        return packingListReference;
+    }
+
+    public LocalDate getPackingListDate() {
+        return packingListDate;
+    }
+
     public String getPackingListS3Key() {
         return packingListS3Key;
+    }
+
+    public String getInspectionReportReference() {
+        return inspectionReportReference;
+    }
+
+    public LocalDate getInspectionReportDate() {
+        return inspectionReportDate;
+    }
+
+    public String getInspectionReportOutcome() {
+        return inspectionReportOutcome;
     }
 
     public String getInspectionReportS3Key() {
