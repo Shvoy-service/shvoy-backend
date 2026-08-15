@@ -16,7 +16,9 @@ import jakarta.validation.Valid;
 
 import com.shvoy.payments.dto.InvoiceResponse;
 import com.shvoy.payments.dto.LogInvoiceRequest;
+import com.shvoy.payments.dto.RunningPositionResponse;
 import com.shvoy.payments.service.InvoiceService;
+import com.shvoy.payments.service.RunningPositionService;
 
 /**
  * Story 6.4 — log a supplier's final invoice against a PO, and read it back.
@@ -32,9 +34,11 @@ import com.shvoy.payments.service.InvoiceService;
 class InvoiceController {
 
     private final InvoiceService invoiceService;
+    private final RunningPositionService runningPositionService;
 
-    InvoiceController(InvoiceService invoiceService) {
+    InvoiceController(InvoiceService invoiceService, RunningPositionService runningPositionService) {
         this.invoiceService = invoiceService;
+        this.runningPositionService = runningPositionService;
     }
 
     @PostMapping("/api/purchase-orders/{poId}/invoices")
@@ -43,9 +47,26 @@ class InvoiceController {
         return ResponseEntity.status(HttpStatus.CREATED).body(invoiceService.log(poId, request));
     }
 
+    /**
+     * Correct one specific invoice (invoice remodel) — supersedes {@code id} and
+     * records its replacement, chained. This is the supersession path; logging a
+     * new invoice via {@link #log} no longer supersedes anything.
+     */
+    @PostMapping("/api/invoices/{id}/corrections")
+    @PreAuthorize("hasAnyRole('ADMIN', 'PURCHASING', 'FINANCE')")
+    ResponseEntity<InvoiceResponse> correct(@PathVariable UUID id, @Valid @RequestBody LogInvoiceRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(invoiceService.correct(id, request));
+    }
+
     @GetMapping("/api/purchase-orders/{poId}/invoices")
     List<InvoiceResponse> listForPurchaseOrder(@PathVariable UUID poId) {
         return invoiceService.listForPurchaseOrder(poId);
+    }
+
+    /** The PO's derived running position — % invoiced / paid / received, and the over-invoice flag (invoice remodel). */
+    @GetMapping("/api/purchase-orders/{poId}/running-position")
+    RunningPositionResponse runningPosition(@PathVariable UUID poId) {
+        return runningPositionService.compute(poId);
     }
 
     @GetMapping("/api/invoices/{id}")

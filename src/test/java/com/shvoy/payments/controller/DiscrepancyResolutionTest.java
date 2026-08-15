@@ -79,6 +79,9 @@ class DiscrepancyResolutionTest {
             jdbcTemplate.update("DELETE FROM discrepancy_cases WHERE company_id = ?", c);
             jdbcTemplate.update("DELETE FROM credit_ledger_audit_events WHERE company_id = ?", c);
             jdbcTemplate.update("DELETE FROM credit_ledger_entries WHERE company_id = ?", c);
+            jdbcTemplate.update("DELETE FROM invoice_covered_lines WHERE company_id = ?", c);
+            // Break the self-referential correction chain (supersedes_invoice_id) before the bulk delete.
+            jdbcTemplate.update("UPDATE invoices SET supersedes_invoice_id = NULL WHERE company_id = ?", c);
             jdbcTemplate.update("DELETE FROM invoices WHERE company_id = ?", c);
             jdbcTemplate.update("DELETE FROM proforma_invoice_lines WHERE company_id = ?", c);
             jdbcTemplate.update("DELETE FROM proforma_invoices WHERE company_id = ?", c);
@@ -108,8 +111,8 @@ class DiscrepancyResolutionTest {
     @Test
     void aReFailUpdatesTheSameCaseNotADuplicate() throws Exception {
         UUID po = legs(companyA, supplierAId, skuAId, 10, 10, 10);
-        logInvoice(po, "25.00", null, null);
-        logInvoice(po, "30.00", null, null); // supersedes; still a mismatch
+        UUID invId = logInvoice(po, "25.00", null, null);
+        correctInvoice(invId, "30.00", null, null); // re-fail: correct the same invoice, still a mismatch
 
         assertThat(caseCountFor(po)).isEqualTo(1);
         assertThat(auditCount(openCaseFor(po), "DETAIL_UPDATED")).isEqualTo(1);
@@ -118,10 +121,10 @@ class DiscrepancyResolutionTest {
     @Test
     void correctingTheInvoiceAutoResolvesTheCase() throws Exception {
         UUID po = legs(companyA, supplierAId, skuAId, 10, 10, 10);
-        logInvoice(po, "25.00", null, null);
+        UUID invId = logInvoice(po, "25.00", null, null);
         UUID caseId = openCaseFor(po);
 
-        logInvoice(po, "20.00", null, null); // now correct -> match passes
+        correctInvoice(invId, "20.00", null, null); // now correct -> match passes
 
         assertThat(statusOfCase(caseId)).isEqualTo("RESOLVED");
         assertThat(resolutionTypeOfCase(caseId)).isEqualTo("CORRECTED");
@@ -255,18 +258,38 @@ class DiscrepancyResolutionTest {
 
     // --- driving / seeding ---
 
-    private void logInvoice(UUID po, String amount, String claimedCredit, String ref) throws Exception {
+    /** Logs an AMOUNT-coverage invoice (the free-standing fallback) and returns its id. */
+    private UUID logInvoice(UUID po, String amount, String claimedCredit, String ref) throws Exception {
+        String content = mockMvc.perform(post("/api/purchase-orders/{po}/invoices", po)
+                .header(TENANT, companyA).header(USER, userAId)
+                .contentType(MediaType.APPLICATION_JSON).content(invoiceBody(amount, claimedCredit, ref)))
+            .andExpect(status().isCreated())
+            .andReturn().getResponse().getContentAsString();
+        return UUID.fromString(com.jayway.jsonpath.JsonPath.read(content, "$.id"));
+    }
+
+    /**
+     * Re-issue a corrected invoice against a specific one (invoice remodel: a
+     * re-fail / correction is now an explicit supersession of that invoice, not a
+     * second concurrent invoice on the PO).
+     */
+    private void correctInvoice(UUID invoiceId, String amount, String claimedCredit, String ref) throws Exception {
+        mockMvc.perform(post("/api/invoices/{id}/corrections", invoiceId)
+                .header(TENANT, companyA).header(USER, userAId)
+                .contentType(MediaType.APPLICATION_JSON).content(invoiceBody(amount, claimedCredit, ref)))
+            .andExpect(status().isCreated());
+    }
+
+    private String invoiceBody(String amount, String claimedCredit, String ref) {
         StringBuilder body = new StringBuilder("{\"invoiceReference\":\"INV\",\"amount\":").append(amount)
-            .append(",\"currency\":\"USD\",\"invoiceDate\":\"").append(LocalDate.now()).append("\"");
+            .append(",\"currency\":\"USD\",\"coversType\":\"AMOUNT\",\"invoiceDate\":\"").append(LocalDate.now())
+            .append("\"");
         if (claimedCredit != null) {
             body.append(",\"claimedCreditAmount\":").append(claimedCredit)
                 .append(",\"claimedCreditReference\":\"").append(ref).append("\"");
         }
         body.append("}");
-        mockMvc.perform(post("/api/purchase-orders/{po}/invoices", po)
-                .header(TENANT, companyA).header(USER, userAId)
-                .contentType(MediaType.APPLICATION_JSON).content(body.toString()))
-            .andExpect(status().isCreated());
+        return body.toString();
     }
 
     /** PO(GEN) + line + balance payment + confirmed PI + GRN projection at the given quantities (10 @ 2.00). */
