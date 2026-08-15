@@ -72,6 +72,16 @@ public class Invoice extends TenantScoped {
     @Column(name = "claimed_credit_reference", length = 100)
     private String claimedCreditReference;
 
+    @jakarta.persistence.Enumerated(jakarta.persistence.EnumType.STRING)
+    @Column(name = "covers_type", nullable = false, length = 20)
+    private InvoiceCoversType coversType;
+
+    @Column(name = "covers_consignment_id")
+    private UUID coversConsignmentId;
+
+    @Column(name = "supersedes_invoice_id")
+    private UUID supersedesInvoiceId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private InvoiceStatus status;
@@ -92,7 +102,8 @@ public class Invoice extends TenantScoped {
     }
 
     public Invoice(UUID purchaseOrderId, String invoiceReference, Money amount, LocalDate invoiceDate,
-            BigDecimal claimedCreditAmount, String claimedCreditReference, UUID loggedBy) {
+            BigDecimal claimedCreditAmount, String claimedCreditReference, InvoiceCoversType coversType,
+            UUID coversConsignmentId, UUID supersedesInvoiceId, UUID loggedBy) {
         this.purchaseOrderId = purchaseOrderId;
         this.invoiceReference = invoiceReference;
         this.amountAmount = amount.amount();
@@ -100,6 +111,9 @@ public class Invoice extends TenantScoped {
         this.invoiceDate = invoiceDate;
         this.claimedCreditAmount = claimedCreditAmount;
         this.claimedCreditReference = claimedCreditReference;
+        this.coversType = coversType;
+        this.coversConsignmentId = coversConsignmentId;
+        this.supersedesInvoiceId = supersedesInvoiceId;
         this.status = InvoiceStatus.LOGGED;
         this.active = true;
         this.loggedBy = loggedBy;
@@ -148,6 +162,18 @@ public class Invoice extends TenantScoped {
 
     public boolean isActive() {
         return active;
+    }
+
+    public InvoiceCoversType getCoversType() {
+        return coversType;
+    }
+
+    public UUID getCoversConsignmentId() {
+        return coversConsignmentId;
+    }
+
+    public UUID getSupersedesInvoiceId() {
+        return supersedesInvoiceId;
     }
 
     public UUID getLoggedBy() {

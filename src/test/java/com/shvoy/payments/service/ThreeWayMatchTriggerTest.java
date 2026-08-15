@@ -95,7 +95,8 @@ class ThreeWayMatchTriggerTest {
         TenantContext.set(company);
         CurrentUserContext.set(userId);
         invoiceService.log(po, new LogInvoiceRequest(
-            "INV-1", new BigDecimal("20.00"), "USD", LocalDate.now(), null, null));
+            "INV-1", new BigDecimal("20.00"), "USD", LocalDate.now(), null, null,
+            com.shvoy.payments.domain.InvoiceCoversType.AMOUNT, null, null));
 
         assertThat(statusOf(balance)).isEqualTo("READY_TO_PAY");
     }

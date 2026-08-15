@@ -69,6 +69,9 @@ class InvoiceControllerTest {
     void cleanUp() {
         jdbcTemplate.update("DELETE FROM payment_audit_events WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM payments WHERE company_id IN (?, ?)", companyA, companyB);
+        // Break the self-referential correction chain (supersedes_invoice_id) before the bulk delete.
+        jdbcTemplate.update("UPDATE invoices SET supersedes_invoice_id = NULL WHERE company_id IN (?, ?)", companyA, companyB);
+        jdbcTemplate.update("DELETE FROM invoice_covered_lines WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM invoices WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM purchase_orders WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM users WHERE company_id IN (?, ?)", companyA, companyB);
@@ -95,13 +98,23 @@ class InvoiceControllerTest {
         return id;
     }
 
+    /** AMOUNT coverage — the free-standing fallback, always coherent (no references to validate). */
     private String body(String reference, String amount, String currency, String date) {
         return "{\"invoiceReference\":\"" + reference + "\",\"amount\":" + amount + ",\"currency\":\"" + currency
-            + "\",\"invoiceDate\":\"" + date + "\"}";
+            + "\",\"invoiceDate\":\"" + date + "\",\"coversType\":\"AMOUNT\"}";
     }
 
     private MvcResult logInvoice(UUID poId, String reqBody) throws Exception {
         return mockMvc.perform(post("/api/purchase-orders/{poId}/invoices", poId)
+                .header(TENANT_HEADER, companyA.toString())
+                .header(USER_HEADER, userAId.toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(reqBody))
+            .andReturn();
+    }
+
+    private MvcResult correctInvoice(UUID invoiceId, String reqBody) throws Exception {
+        return mockMvc.perform(post("/api/invoices/{id}/corrections", invoiceId)
                 .header(TENANT_HEADER, companyA.toString())
                 .header(USER_HEADER, userAId.toString())
                 .contentType(MediaType.APPLICATION_JSON)
@@ -126,7 +139,8 @@ class InvoiceControllerTest {
                 .header(USER_HEADER, userAId.toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"invoiceReference\":\"INV-9001\",\"amount\":1234.56,\"currency\":\"USD\","
-                    + "\"invoiceDate\":\"2026-03-01\",\"claimedCreditAmount\":50.00,\"claimedCreditReference\":\"CN-1\"}"))
+                    + "\"invoiceDate\":\"2026-03-01\",\"claimedCreditAmount\":50.00,\"claimedCreditReference\":\"CN-1\","
+                    + "\"coversType\":\"AMOUNT\"}"))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.purchaseOrderId").value(poId.toString()))
             .andExpect(jsonPath("$.invoiceReference").value("INV-9001"))
@@ -137,6 +151,8 @@ class InvoiceControllerTest {
             .andExpect(jsonPath("$.claimedCreditReference").value("CN-1"))
             .andExpect(jsonPath("$.status").value("LOGGED"))
             .andExpect(jsonPath("$.active").value(true))
+            .andExpect(jsonPath("$.coversType").value("AMOUNT"))
+            .andExpect(jsonPath("$.weakestSignal").value(true))
             .andExpect(jsonPath("$.loggedBy").value(userAId.toString()));
     }
 
@@ -175,24 +191,45 @@ class InvoiceControllerTest {
             .andExpect(jsonPath("$.amount.currency").value("GBP")); // recorded as GBP, no FX
     }
 
-    // --- supersession ---
+    // --- many-per-PO: logging no longer supersedes (invoice remodel) ---
 
     @Test
-    void aSecondInvoiceSupersedesTheFirst() throws Exception {
+    void aSecondInvoiceDoesNotSupersedeTheFirst() throws Exception {
         UUID poId = seedPo(supplierAId, companyA, "GENERATED");
         UUID firstId = UUID.fromString(JsonPath.read(
             logInvoice(poId, body("INV-1", "100.00", "USD", "2026-03-01")).getResponse().getContentAsString(), "$.id"));
         UUID secondId = UUID.fromString(JsonPath.read(
             logInvoice(poId, body("INV-2", "110.00", "USD", "2026-03-05")).getResponse().getContentAsString(), "$.id"));
 
+        // Both stay active — a PO can carry many concurrent invoices now.
         mockMvc.perform(get("/api/invoices/{id}", firstId).header(TENANT_HEADER, companyA.toString()))
-            .andExpect(jsonPath("$.status").value("SUPERSEDED"))
-            .andExpect(jsonPath("$.active").value(false));
+            .andExpect(jsonPath("$.status").value("LOGGED"))
+            .andExpect(jsonPath("$.active").value(true));
         mockMvc.perform(get("/api/invoices/{id}", secondId).header(TENANT_HEADER, companyA.toString()))
             .andExpect(jsonPath("$.status").value("LOGGED"))
             .andExpect(jsonPath("$.active").value(true));
         mockMvc.perform(get("/api/purchase-orders/{poId}/invoices", poId).header(TENANT_HEADER, companyA.toString()))
             .andExpect(jsonPath("$.length()").value(2));
+    }
+
+    // --- correction is the explicit supersession path ---
+
+    @Test
+    void correctingAnInvoiceSupersedesThatSpecificInvoice() throws Exception {
+        UUID poId = seedPo(supplierAId, companyA, "GENERATED");
+        UUID firstId = UUID.fromString(JsonPath.read(
+            logInvoice(poId, body("INV-1", "100.00", "USD", "2026-03-01")).getResponse().getContentAsString(), "$.id"));
+        UUID correctionId = UUID.fromString(JsonPath.read(
+            correctInvoice(firstId, body("INV-1B", "105.00", "USD", "2026-03-02")).getResponse().getContentAsString(),
+            "$.id"));
+
+        mockMvc.perform(get("/api/invoices/{id}", firstId).header(TENANT_HEADER, companyA.toString()))
+            .andExpect(jsonPath("$.status").value("SUPERSEDED"))
+            .andExpect(jsonPath("$.active").value(false));
+        mockMvc.perform(get("/api/invoices/{id}", correctionId).header(TENANT_HEADER, companyA.toString()))
+            .andExpect(jsonPath("$.status").value("LOGGED"))
+            .andExpect(jsonPath("$.active").value(true))
+            .andExpect(jsonPath("$.supersedesInvoiceId").value(firstId.toString()));
     }
 
     // --- the anchor-date trigger (first real caller of 6.2's seam) ---
@@ -208,16 +245,30 @@ class InvoiceControllerTest {
     }
 
     @Test
-    void supersedingWithANewInvoiceDateRecalculatesTheDueDate() throws Exception {
+    void correctingTheFirstInvoiceWithANewDateRecalculatesTheDueDate() throws Exception {
+        UUID poId = seedPo(supplierAId, companyA, "GENERATED");
+        UUID balanceId = seedInvoiceAnchoredBalance(companyA, poId, 30);
+
+        UUID firstId = UUID.fromString(JsonPath.read(
+            logInvoice(poId, body("INV-1", "100.00", "USD", "2026-03-01")).getResponse().getContentAsString(), "$.id"));
+        assertDueDate(balanceId, LocalDate.of(2026, 3, 31));
+
+        // A correction of the first (anchoring) invoice with a later date re-fires the anchor; 6.2 recalculates.
+        correctInvoice(firstId, body("INV-1B", "100.00", "USD", "2026-03-10"));
+        assertDueDate(balanceId, LocalDate.of(2026, 4, 9));
+    }
+
+    @Test
+    void aSecondIndependentInvoiceDoesNotMoveTheAnchorTheFirstSet() throws Exception {
         UUID poId = seedPo(supplierAId, companyA, "GENERATED");
         UUID balanceId = seedInvoiceAnchoredBalance(companyA, poId, 30);
 
         logInvoice(poId, body("INV-1", "100.00", "USD", "2026-03-01"));
         assertDueDate(balanceId, LocalDate.of(2026, 3, 31));
 
-        // A corrected invoice with a later date re-fires the anchor; 6.2's re-entrancy recalculates.
+        // A brand-new second invoice is NOT the first non-deposit invoice — the anchor policy leaves the date put.
         logInvoice(poId, body("INV-2", "100.00", "USD", "2026-03-10"));
-        assertDueDate(balanceId, LocalDate.of(2026, 4, 9));
+        assertDueDate(balanceId, LocalDate.of(2026, 3, 31));
     }
 
     // --- authorisation & tenancy ---
