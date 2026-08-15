@@ -9,6 +9,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.shvoy.Money;
@@ -59,12 +60,13 @@ public class ThreeWayMatchService {
     private final GrnProjectionLineRepository grnProjectionLineRepository;
     private final InvoiceRepository invoiceRepository;
     private final CreditLedgerService creditLedgerService;
+    private final DiscrepancyCaseService discrepancyCaseService;
 
     ThreeWayMatchService(PaymentRepository paymentRepository, PaymentAuditService paymentAuditService,
             PaymentGatePolicy gatePolicy, PurchaseOrderService purchaseOrderService,
             ProformaInvoiceMatchService proformaInvoiceMatchService,
             GrnProjectionLineRepository grnProjectionLineRepository, InvoiceRepository invoiceRepository,
-            CreditLedgerService creditLedgerService) {
+            CreditLedgerService creditLedgerService, DiscrepancyCaseService discrepancyCaseService) {
         this.paymentRepository = paymentRepository;
         this.paymentAuditService = paymentAuditService;
         this.gatePolicy = gatePolicy;
@@ -73,9 +75,19 @@ public class ThreeWayMatchService {
         this.grnProjectionLineRepository = grnProjectionLineRepository;
         this.invoiceRepository = invoiceRepository;
         this.creditLedgerService = creditLedgerService;
+        this.discrepancyCaseService = discrepancyCaseService;
     }
 
-    @Transactional
+    /**
+     * {@code REQUIRES_NEW} so the verdict always commits in its own transaction.
+     * The match is driven from {@code @TransactionalEventListener(AFTER_COMMIT)}
+     * (6.6's case creation, the credit/PI-confirm/PO-generation triggers): a
+     * plain {@code REQUIRED} write inside an after-commit callback silently fails
+     * to persist, because the triggering transaction is already completing. A
+     * new physical transaction avoids that; it's a single nested level (the
+     * triggering tx has committed), well within the pool.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void evaluate(UUID purchaseOrderId) {
         List<Payment> payments = paymentRepository.findAll().stream()
             .filter(payment -> payment.getPurchaseOrderId().equals(purchaseOrderId))
@@ -172,6 +184,8 @@ public class ThreeWayMatchService {
                 paymentAuditService.record(balance.getId(), purchaseOrderId, PaymentAuditEventType.MATCH_PASSED,
                     "Three-way match passed — READY_TO_PAY");
             }
+            // Auto-resolve any open discrepancy case: the data was corrected (or a credit now aligns) — 6.6.
+            discrepancyCaseService.onMatchPassed(balance);
         } else {
             boolean changed = balance.getStatus() != PaymentStatus.BLOCKED
                 || !Objects.equals(balance.getMatchDetail(), verdict.detail());
@@ -181,6 +195,8 @@ public class ThreeWayMatchService {
                 paymentAuditService.record(balance.getId(), purchaseOrderId, PaymentAuditEventType.MATCH_BLOCKED,
                     verdict.detail());
             }
+            // Route the mismatch to a resolver: open (or refresh) the discrepancy case — 6.6.
+            discrepancyCaseService.onMatchBlocked(balance, verdict.detail());
         }
     }
 }

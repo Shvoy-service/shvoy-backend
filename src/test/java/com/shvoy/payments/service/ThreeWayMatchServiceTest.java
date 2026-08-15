@@ -61,6 +61,8 @@ class ThreeWayMatchServiceTest {
         // Delete every user-referencing row for BOTH companies before any users — a cross-tenant
         // test seeds company B's PO/PI/invoice with company A's user, so per-company ordering isn't enough.
         for (UUID company : new UUID[] {companyA, companyB}) {
+            jdbcTemplate.update("DELETE FROM discrepancy_case_audit_events WHERE company_id = ?", company);
+            jdbcTemplate.update("DELETE FROM discrepancy_cases WHERE company_id = ?", company);
             jdbcTemplate.update("DELETE FROM payment_audit_events WHERE company_id = ?", company);
             jdbcTemplate.update("DELETE FROM payment_grn_projection_lines WHERE company_id = ?", company);
             jdbcTemplate.update("DELETE FROM credit_ledger_audit_events WHERE company_id = ?", company);
