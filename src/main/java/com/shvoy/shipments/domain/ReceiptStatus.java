@@ -10,6 +10,11 @@ package com.shvoy.shipments.domain;
  *   <li>{@code DOCUMENTS_PENDING} — every consignment's starting state: the
  *       BL-level record exists but this portion's documents (its own packing
  *       list, inspection report) aren't yet enough to receipt it.</li>
+ *   <li>{@code REWORK_REQUIRED} — a pre-shipment hold (Story 7.4 revised): an
+ *       inspection required rework, the goods stayed at the factory, nothing
+ *       shipped. <strong>Not a discrepancy</strong> — there is nothing to
+ *       receive; GRN creation is hard-blocked until a re-inspection passes and
+ *       releases the hold back to {@code DOCUMENTS_PENDING}.</li>
  *   <li>{@code PROVISIONALLY_RECEIPTED} — the provisional GRN has been created
  *       from the documents (Story 7.4); this is the record the three-way match
  *       (6.5) runs against, and it explicitly does <em>not</em> require physical
@@ -29,6 +34,7 @@ package com.shvoy.shipments.domain;
  */
 public enum ReceiptStatus {
     DOCUMENTS_PENDING,
+    REWORK_REQUIRED,
     PROVISIONALLY_RECEIPTED,
     ARRIVED_CONFIRMED,
     ARRIVED_WITH_DISCREPANCY

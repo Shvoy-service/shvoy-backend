@@ -111,6 +111,7 @@ class ProvisionalGrnControllerTest {
         jdbcTemplate.update("DELETE FROM payment_grn_projection_lines WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM shipment_goods_receipt_lines WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM shipment_packing_list_lines WHERE company_id IN (?, ?)", companyA, companyB);
+        jdbcTemplate.update("DELETE FROM inspection_reports WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM shipment_document_audit_events WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM shipment_consignments WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM shipments WHERE company_id IN (?, ?)", companyA, companyB);
@@ -130,6 +131,8 @@ class ProvisionalGrnControllerTest {
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.exists").value(true))
             .andExpect(jsonPath("$.receiptStatus").value("PROVISIONALLY_RECEIPTED"))
+            .andExpect(jsonPath("$.provenance").value("INSPECTION_NOT_DUE"))
+            .andExpect(jsonPath("$.qcFailed").value(false))
             .andExpect(jsonPath("$.lines.length()").value(1))
             .andExpect(jsonPath("$.lines[0].skuId").value(skuA1.toString()))
             .andExpect(jsonPath("$.lines[0].receivedQuantity").value(10));
@@ -180,11 +183,107 @@ class ProvisionalGrnControllerTest {
     }
 
     @Test
-    void absentInspectionReportDoesNotBlock() throws Exception {
-        // BL + packing list, but no inspection report — the stated lean: inspection is non-blocking.
+    void notDueReceiptsOnBlAndPackingListAloneFlaggedNotDue() throws Exception {
+        // A company that never touches inspection fields: BL + packing list is enough, flagged inspection_not_due.
         logBl(poA1, "2026-09-01");
         logPackingList(poA1, "PL-A1", skuA1, 10);
-        mockMvc.perform(createGrn(poA1)).andExpect(status().isCreated());
+        mockMvc.perform(createGrn(poA1))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.provenance").value("INSPECTION_NOT_DUE"));
+    }
+
+    @Test
+    void inspectionDueWithoutReportBlocksAsInspectionPending() throws Exception {
+        logBl(poA1, "2026-09-01");
+        logPackingList(poA1, "PL-A1", skuA1, 10);
+        setInspectionDue(poA1, true, null);
+
+        mockMvc.perform(createGrn(poA1))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("CONSIGNMENT_INSPECTION_PENDING"));
+    }
+
+    @Test
+    void inspectionDueWithPassReceiptsClean() throws Exception {
+        logBl(poA1, "2026-09-01");
+        logPackingList(poA1, "PL-A1", skuA1, 10);
+        setInspectionDue(poA1, true, null);
+        logInspection(poA1, "INS-1", "PASS");
+
+        mockMvc.perform(createGrn(poA1))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.provenance").value("CLEAN"))
+            .andExpect(jsonPath("$.qcFailed").value(false));
+    }
+
+    @Test
+    void reworkBlocksTheGrnThenAPassReleasesAndItCreates() throws Exception {
+        logBl(poA1, "2026-09-01");
+        logPackingList(poA1, "PL-A1", skuA1, 10);
+        logInspection(poA1, "INS-1", "REWORK_REQUIRED"); // held at factory — nothing shipped
+
+        assertThat(consignmentStatus(poA1)).isEqualTo("REWORK_REQUIRED");
+        mockMvc.perform(createGrn(poA1))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("CONSIGNMENT_IN_REWORK_HOLD"));
+
+        // Reworked goods pass re-inspection → hold released → GRN creates.
+        logInspection(poA1, "INS-2", "PASS");
+        assertThat(consignmentStatus(poA1)).isEqualTo("DOCUMENTS_PENDING");
+        mockMvc.perform(createGrn(poA1))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.provenance").value("CLEAN"));
+        assertThat(auditCount(poA1, "REWORK_HELD")).isEqualTo(1);
+        assertThat(auditCount(poA1, "REWORK_RELEASED")).isEqualTo(1);
+    }
+
+    @Test
+    void failCreatesTheGrnFlaggedQcFailedPublishesTheEventAndDoesNotBlock() throws Exception {
+        logBl(poA1, "2026-09-01");
+        logPackingList(poA1, "PL-A1", skuA1, 10);
+        setInspectionDue(poA1, true, null);
+        logInspection(poA1, "INS-1", "FAIL"); // shipped anyway / found post-shipment
+
+        mockMvc.perform(createGrn(poA1))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.provenance").value("QC_FAILED"))
+            .andExpect(jsonPath("$.qcFailed").value(true))
+            .andExpect(jsonPath("$.exists").value(true)); // the GRN exists — the match is NOT blocked
+
+        // Both the receipted event (6.5's trigger) and the QC-failure seam fired.
+        assertThat(applicationEvents.stream(ProvisionalGoodsReceiptEvent.class).count()).isEqualTo(1);
+        assertThat(applicationEvents.stream(com.shvoy.payments.event.QcFailureEvent.class).toList())
+            .singleElement().satisfies(e -> assertThat(e.purchaseOrderId()).isEqualTo(poA1));
+    }
+
+    @Test
+    void aReworkHoldOnOneConsignmentDoesNotStopASibling() throws Exception {
+        UUID shipmentId = logBl(poA1, "2026-09-01");
+        logPackingList(poA1, "PL-A1", skuA1, 10);
+        mockMvc.perform(post("/api/shipments/{s}/consignments", shipmentId)
+                .header(TENANT_HEADER, companyA).header(USER_HEADER, userAId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"purchaseOrderId\":\"" + poA2 + "\"}"))
+            .andExpect(status().isCreated());
+        logPackingList(poA2, "PL-A2", skuA2, 5);
+
+        // A1 held in rework; A2 receipts independently.
+        logInspection(poA1, "INS-1", "REWORK_REQUIRED");
+        mockMvc.perform(createGrn(poA2)).andExpect(status().isCreated());
+        mockMvc.perform(createGrn(poA1))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("CONSIGNMENT_IN_REWORK_HOLD"));
+    }
+
+    @Test
+    void clearingInspectionDueRequiresAReason() throws Exception {
+        logBl(poA1, "2026-09-01");
+        setInspectionDue(poA1, true, null);
+        mockMvc.perform(post("/api/purchase-orders/{po}/shipment/inspection-due", poA1)
+                .header(TENANT_HEADER, companyA).header(USER_HEADER, userAId)
+                .contentType(MediaType.APPLICATION_JSON).content("{\"due\":false}"))
+            .andExpect(status().isBadRequest())
+            .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }
 
     @Test
@@ -287,6 +386,33 @@ class ProvisionalGrnControllerTest {
     private MockHttpServletRequestBuilder createGrn(UUID poId) {
         return post("/api/purchase-orders/{po}/shipment/provisional-grn", poId)
             .header(TENANT_HEADER, companyA).header(USER_HEADER, userAId);
+    }
+
+    private void logInspection(UUID poId, String reference, String outcome) throws Exception {
+        mockMvc.perform(multipart("/api/purchase-orders/{po}/shipment/inspection-report", poId)
+                .file(file("ins.pdf")).param("reference", reference).param("date", "2026-08-25").param("outcome", outcome)
+                .header(TENANT_HEADER, companyA).header(USER_HEADER, userAId))
+            .andExpect(status().isCreated());
+    }
+
+    private void setInspectionDue(UUID poId, boolean due, String reason) throws Exception {
+        String body = reason == null ? "{\"due\":" + due + "}"
+            : "{\"due\":" + due + ",\"reason\":\"" + reason + "\"}";
+        mockMvc.perform(post("/api/purchase-orders/{po}/shipment/inspection-due", poId)
+                .header(TENANT_HEADER, companyA).header(USER_HEADER, userAId)
+                .contentType(MediaType.APPLICATION_JSON).content(body))
+            .andExpect(status().isOk());
+    }
+
+    private String consignmentStatus(UUID poId) {
+        return jdbcTemplate.queryForObject(
+            "SELECT receipt_status FROM shipment_consignments WHERE purchase_order_id = ?", String.class, poId);
+    }
+
+    private int auditCount(UUID poId, String eventType) {
+        return jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM shipment_document_audit_events WHERE purchase_order_id = ? AND event_type = ?",
+            Integer.class, poId, eventType);
     }
 
     private static MockMultipartFile file(String name) {

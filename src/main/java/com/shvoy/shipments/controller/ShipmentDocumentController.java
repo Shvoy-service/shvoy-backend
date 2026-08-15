@@ -12,16 +12,21 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import jakarta.validation.Valid;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.shvoy.ValidationException;
+import com.shvoy.shipments.domain.InspectionOutcome;
 import com.shvoy.shipments.domain.ShipmentDocumentType;
+import com.shvoy.shipments.dto.SetInspectionDueRequest;
 import com.shvoy.shipments.dto.ShipmentResponse;
 import com.shvoy.shipments.dto.SkuQuantityRequest;
 import com.shvoy.shipments.service.ShipmentDocumentService;
@@ -83,11 +88,19 @@ class ShipmentDocumentController {
             @PathVariable UUID purchaseOrderId,
             @RequestParam("reference") String reference,
             @RequestParam(value = "date", required = false) String date,
-            @RequestParam(value = "outcome", required = false) String outcome,
+            @RequestParam("outcome") String outcome,
+            @RequestParam(value = "notes", required = false) String notes,
             @RequestParam("file") MultipartFile file) {
         ShipmentResponse response = shipmentDocumentService.logInspectionReport(
-            purchaseOrderId, reference, parseOptionalDate("date", date), outcome, file);
+            purchaseOrderId, reference, parseOptionalDate("date", date), parseOutcome(outcome), notes, file);
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @PostMapping("/inspection-due")
+    @PreAuthorize("hasAnyRole('ADMIN', 'PURCHASING')")
+    ShipmentResponse setInspectionDue(@PathVariable UUID purchaseOrderId,
+            @Valid @RequestBody SetInspectionDueRequest request) {
+        return shipmentDocumentService.setInspectionDue(purchaseOrderId, request.due(), request.reason());
     }
 
     @GetMapping
@@ -110,6 +123,14 @@ class ShipmentDocumentController {
             return List.of(objectMapper.readValue(lines, SkuQuantityRequest[].class));
         } catch (JsonProcessingException e) {
             throw new ValidationException("lines must be a JSON array of {skuId, quantity}");
+        }
+    }
+
+    private static InspectionOutcome parseOutcome(String value) {
+        try {
+            return InspectionOutcome.valueOf(value);
+        } catch (IllegalArgumentException e) {
+            throw new ValidationException("outcome must be one of PASS, REWORK_REQUIRED, FAIL");
         }
     }
 

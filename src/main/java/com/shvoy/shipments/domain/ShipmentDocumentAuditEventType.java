@@ -21,5 +21,15 @@ public enum ShipmentDocumentAuditEventType {
     /** A provisional GRN was created for a consignment (Story 7.4). */
     PROVISIONAL_GRN_CREATED,
     /** A provisional GRN's received quantities were amended before arrival (Story 7.4). */
-    PROVISIONAL_GRN_AMENDED
+    PROVISIONAL_GRN_AMENDED,
+    /** The inspection-due flag was set (Story 7.4 revised). */
+    INSPECTION_DUE_SET,
+    /** The inspection-due flag was cleared — a waived control, so a reason is required (Story 7.4 revised). */
+    INSPECTION_DUE_CLEARED,
+    /** A REWORK_REQUIRED inspection held the consignment at the factory (Story 7.4 revised). */
+    REWORK_HELD,
+    /** A subsequent PASS released a rework hold (Story 7.4 revised). */
+    REWORK_RELEASED,
+    /** A provisional GRN was created despite a failed inspection — flagged qc_failed (Story 7.4 revised). */
+    GRN_QC_FAILED
 }
