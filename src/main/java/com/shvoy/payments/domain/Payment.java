@@ -16,6 +16,7 @@ import jakarta.persistence.Table;
 
 import com.shvoy.Money;
 import com.shvoy.TenantScoped;
+import com.shvoy.suppliers.domain.AnchorEvent;
 
 /**
  * A deposit or balance payment owed against a PO — see Story 6.1. The
@@ -70,6 +71,16 @@ public class Payment extends TenantScoped {
     private LocalDate dueDate;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "anchor_event", length = 20)
+    private AnchorEvent anchorEvent;
+
+    @Column(name = "days_offset")
+    private Integer daysOffset;
+
+    @Column(name = "anchor_date_applied")
+    private LocalDate anchorDateApplied;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private PaymentStatus status;
 
@@ -82,14 +93,51 @@ public class Payment extends TenantScoped {
     protected Payment() {
     }
 
-    public Payment(UUID purchaseOrderId, PaymentType type, Money amount) {
+    private Payment(UUID purchaseOrderId, PaymentType type, Money amount) {
         this.purchaseOrderId = purchaseOrderId;
         this.type = type;
         this.amountAmount = amount.amount();
         this.currency = amount.currency();
         this.status = PaymentStatus.PENDING;
-        this.dueDate = null;
         this.createdAt = Instant.now();
+    }
+
+    /**
+     * A deposit payment (Story 6.2) — born with its due date, the PO
+     * generation date (the MVP default: deposits are effectively "due now" to
+     * unlock production, not anchored to a shipment event). No anchor terms.
+     */
+    public static Payment deposit(UUID purchaseOrderId, Money amount, LocalDate generationDate) {
+        Payment payment = new Payment(purchaseOrderId, PaymentType.DEPOSIT, amount);
+        payment.dueDate = generationDate;
+        return payment;
+    }
+
+    /**
+     * A balance payment (Story 6.2) — born <em>without</em> a due date, holding
+     * the terms snapshotted at generation ({@code anchorEvent} + signed {@code
+     * daysOffset}) so its due date can be computed once the anchor event's date
+     * becomes known (Feature 7). Both are null when the supplier had no terms
+     * configured, in which case the due date has no anchor and stays null.
+     */
+    public static Payment balance(UUID purchaseOrderId, Money amount, AnchorEvent anchorEvent, Integer daysOffset) {
+        Payment payment = new Payment(purchaseOrderId, PaymentType.BALANCE, amount);
+        payment.anchorEvent = anchorEvent;
+        payment.daysOffset = daysOffset;
+        return payment;
+    }
+
+    /**
+     * Sets (or revises) the calculated due date from a now-known anchor date —
+     * Story 6.2's re-entrant seam. Due date = {@code anchorDate + daysOffset};
+     * {@code anchorDate} is retained so the derivation stays explicable. Only
+     * valid on a balance with snapshotted terms; the caller
+     * ({@code PaymentDueDateService}) only invokes it on matching balances.
+     */
+    public void applyCalculatedDueDate(LocalDate anchorDate) {
+        this.anchorDateApplied = anchorDate;
+        this.dueDate = anchorDate.plusDays(daysOffset);
+        this.updatedAt = Instant.now();
     }
 
     public UUID getId() {
@@ -112,6 +160,21 @@ public class Payment extends TenantScoped {
     /** Null until 6.2 calculates it (or, for a balance, until Feature 7's anchor event). */
     public LocalDate getDueDate() {
         return dueDate;
+    }
+
+    /** The event a balance's due date is anchored to (snapshotted at generation); null for deposits / no-terms. */
+    public AnchorEvent getAnchorEvent() {
+        return anchorEvent;
+    }
+
+    /** The signed days offset from the anchor date (snapshotted at generation); null for deposits / no-terms. */
+    public Integer getDaysOffset() {
+        return daysOffset;
+    }
+
+    /** The anchor date the current due date was derived from — for auditability; null until an anchor date is applied. */
+    public LocalDate getAnchorDateApplied() {
+        return anchorDateApplied;
     }
 
     public PaymentStatus getStatus() {

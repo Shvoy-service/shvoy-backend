@@ -169,13 +169,27 @@ class PaymentTermsControllerTest {
 
     @Test
     @WithMockUser(roles = "PURCHASING")
-    void setWithNegativeDaysOffsetReturnsValidationError() throws Exception {
+    void setWithNegativeDaysOffsetIsAccepted() throws Exception {
+        // Relaxed in 6.2: a negative offset ("due N days before the anchor") is a real payment term (Roadmap v2's "±").
         UUID supplierId = seedSupplier(companyA, "Acme Corp");
 
         mockMvc.perform(put("/api/suppliers/{id}/payment-terms", supplierId)
                 .header(TENANT_HEADER, companyA.toString())
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"depositPercentage\":30,\"anchorEvent\":\"BL\",\"daysOffset\":-1}"))
+                .content("{\"depositPercentage\":30,\"anchorEvent\":\"ARRIVAL\",\"daysOffset\":-5}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.daysOffset").value(-5));
+    }
+
+    @Test
+    @WithMockUser(roles = "PURCHASING")
+    void setWithAnAbsurdlyLargeDaysOffsetReturnsValidationError() throws Exception {
+        UUID supplierId = seedSupplier(companyA, "Acme Corp");
+
+        mockMvc.perform(put("/api/suppliers/{id}/payment-terms", supplierId)
+                .header(TENANT_HEADER, companyA.toString())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"depositPercentage\":30,\"anchorEvent\":\"BL\",\"daysOffset\":1000}"))
             .andExpect(status().isBadRequest())
             .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
     }

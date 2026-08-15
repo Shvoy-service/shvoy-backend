@@ -2,6 +2,7 @@ package com.shvoy.purchaseorders.service;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -142,7 +143,9 @@ public class PurchaseOrderGenerationService {
         // @EventListener runs inline (same thread → TenantContext intact), so payment creation
         // commits atomically with generation. purchaseorders neither knows nor cares who listens.
         eventPublisher.publishEvent(new PurchaseOrderGeneratedEvent(
-            purchaseOrder.getId(), purchaseOrder.getOrderTotal(), purchaseOrder.getDeposit(), purchaseOrder.getBalance()));
+            purchaseOrder.getId(), purchaseOrder.getSupplierId(),
+            LocalDate.ofInstant(purchaseOrder.getGeneratedAt(), ZoneOffset.UTC),
+            purchaseOrder.getOrderTotal(), purchaseOrder.getDeposit(), purchaseOrder.getBalance()));
 
         return purchaseOrderService.toResponse(purchaseOrder);
     }
