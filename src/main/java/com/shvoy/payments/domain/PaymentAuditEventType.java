@@ -14,5 +14,11 @@ package com.shvoy.payments.domain;
  */
 public enum PaymentAuditEventType {
     DUE_DATE_SET,
-    DUE_DATE_RECALCULATED
+    DUE_DATE_RECALCULATED,
+    /** The three-way match passed — the balance became READY_TO_PAY (Story 6.5). */
+    MATCH_PASSED,
+    /** The three-way match failed — the balance was BLOCKED; the detail records which leg (Story 6.5). */
+    MATCH_BLOCKED,
+    /** A deposit was made payable without the match, per the per-type gate policy (Story 6.5). */
+    DEPOSIT_PAYABLE
 }

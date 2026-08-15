@@ -84,6 +84,9 @@ public class Payment extends TenantScoped {
     @Column(name = "status", nullable = false, length = 20)
     private PaymentStatus status;
 
+    @Column(name = "match_detail", length = 2000)
+    private String matchDetail;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -140,6 +143,51 @@ public class Payment extends TenantScoped {
         this.updatedAt = Instant.now();
     }
 
+    /**
+     * Whether the three-way match (Story 6.5) may set this payment's status. The
+     * match owns only the <em>automatic</em> states ({@code PENDING} /
+     * {@code BLOCKED} / {@code READY_TO_PAY}); it must never override a human
+     * decision ({@code PAID} released or {@code ON_HOLD} parked, 6.8). A blocked
+     * match that later passes still can't un-hold a payment a person parked.
+     */
+    public boolean isMatchMutable() {
+        return status == PaymentStatus.PENDING
+            || status == PaymentStatus.BLOCKED
+            || status == PaymentStatus.READY_TO_PAY;
+    }
+
+    /** The match passed → READY_TO_PAY, clearing any prior failure detail (Story 6.5). Guarded by {@link #isMatchMutable()}. */
+    public void markMatchPassed() {
+        this.status = PaymentStatus.READY_TO_PAY;
+        this.matchDetail = null;
+        this.updatedAt = Instant.now();
+    }
+
+    /** The match failed → BLOCKED, recording which leg disagreed (Story 6.5). Guarded by {@link #isMatchMutable()}. */
+    public void markMatchBlocked(String detail) {
+        this.status = PaymentStatus.BLOCKED;
+        this.matchDetail = detail;
+        this.updatedAt = Instant.now();
+    }
+
+    /**
+     * Not yet matchable — a leg is still missing (Story 6.5). Kept distinct from
+     * {@code BLOCKED}: a missing invoice/GRN is "awaiting X", not a mismatch, and
+     * the queue should say so honestly. Returns the payment to {@code PENDING}
+     * with the awaiting reason in the detail.
+     */
+    public void markAwaiting(String detail) {
+        this.status = PaymentStatus.PENDING;
+        this.matchDetail = detail;
+        this.updatedAt = Instant.now();
+    }
+
+    /** A deposit made payable without the match, per the per-type gate policy (Story 6.5). */
+    public void markPayableWithoutMatch() {
+        this.status = PaymentStatus.READY_TO_PAY;
+        this.updatedAt = Instant.now();
+    }
+
     public UUID getId() {
         return id;
     }
@@ -179,6 +227,10 @@ public class Payment extends TenantScoped {
 
     public PaymentStatus getStatus() {
         return status;
+    }
+
+    public String getMatchDetail() {
+        return matchDetail;
     }
 
     public Instant getCreatedAt() {

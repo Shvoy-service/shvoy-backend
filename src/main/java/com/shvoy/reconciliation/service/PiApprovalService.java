@@ -8,6 +8,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,6 +27,7 @@ import com.shvoy.reconciliation.domain.Reconciliation;
 import com.shvoy.reconciliation.domain.ReconciliationAuditEventType;
 import com.shvoy.reconciliation.domain.ReconciliationFindingType;
 import com.shvoy.reconciliation.domain.ReconciliationLine;
+import com.shvoy.reconciliation.event.ProformaInvoiceConfirmedEvent;
 import com.shvoy.reconciliation.dto.ApprovalActionResponse;
 import com.shvoy.reconciliation.dto.ApprovalStateResponse;
 import com.shvoy.reconciliation.repository.ApprovalActionRepository;
@@ -60,6 +62,7 @@ public class PiApprovalService {
     private final ApproverPoolService approverPoolService;
     private final PurchaseOrderService purchaseOrderService;
     private final ReconciliationAuditService reconciliationAuditService;
+    private final ApplicationEventPublisher eventPublisher;
 
     PiApprovalService(
             ProformaInvoiceRepository proformaInvoiceRepository,
@@ -68,7 +71,8 @@ public class PiApprovalService {
             ApprovalActionRepository approvalActionRepository,
             ApproverPoolService approverPoolService,
             PurchaseOrderService purchaseOrderService,
-            ReconciliationAuditService reconciliationAuditService) {
+            ReconciliationAuditService reconciliationAuditService,
+            ApplicationEventPublisher eventPublisher) {
         this.proformaInvoiceRepository = proformaInvoiceRepository;
         this.reconciliationRepository = reconciliationRepository;
         this.reconciliationLineRepository = reconciliationLineRepository;
@@ -76,6 +80,7 @@ public class PiApprovalService {
         this.approverPoolService = approverPoolService;
         this.purchaseOrderService = purchaseOrderService;
         this.reconciliationAuditService = reconciliationAuditService;
+        this.eventPublisher = eventPublisher;
     }
 
     /**
@@ -111,6 +116,8 @@ public class PiApprovalService {
         if (confirmed) {
             pi.markApproved();
             proformaInvoiceRepository.save(pi);
+            // The confirmed-PI leg of the three-way match is now available (Story 6.5).
+            eventPublisher.publishEvent(new ProformaInvoiceConfirmedEvent(pi.getPurchaseOrderId()));
         }
         reconciliationAuditService.record(proformaInvoiceId, reconciliation.getId(),
             confirmed ? ReconciliationAuditEventType.APPROVED : ReconciliationAuditEventType.APPROVAL_RECORDED,

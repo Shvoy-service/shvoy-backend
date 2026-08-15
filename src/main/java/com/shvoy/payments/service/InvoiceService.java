@@ -65,6 +65,8 @@ public class InvoiceService {
             log.warn("Invoice-date anchor trigger failed for PO {} — invoice {} remains logged",
                 purchaseOrderId, invoiceId, e);
         }
+        // The invoice is the fourth leg of the three-way match (6.5) — re-evaluate now it exists/changed.
+        eventPublisher.publishEvent(new MatchInputChangedEvent(purchaseOrderId));
         return get(invoiceId);
     }
 
