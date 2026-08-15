@@ -52,6 +52,31 @@ public class Supplier extends TenantScoped {
     @Column(name = "contact_email", length = 255)
     private String contactEmail;
 
+    /** The supplier's current/target payment terms (supplier remodel) — loose id refs, not JPA relationships. */
+    @Column(name = "current_term_id")
+    private UUID currentTermId;
+
+    @Column(name = "target_term_id")
+    private UUID targetTermId;
+
+    /** The validation lifecycle — distinct from {@link #status} (ACTIVE/INACTIVE). New suppliers start PENDING. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "validation_status", nullable = false, length = 20)
+    private SupplierValidationStatus validationStatus;
+
+    @Column(name = "bank_account_name", length = 255)
+    private String bankAccountName;
+
+    @Column(name = "bank_account_number", length = 50)
+    private String bankAccountNumber;
+
+    @Column(name = "bank_sort_code", length = 20)
+    private String bankSortCode;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "compliance_status", length = 20)
+    private ComplianceStatus complianceStatus;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -66,7 +91,82 @@ public class Supplier extends TenantScoped {
         this.country = country;
         this.contactEmail = contactEmail;
         this.status = SupplierStatus.ACTIVE;
+        this.validationStatus = SupplierValidationStatus.PENDING;
         this.createdAt = Instant.now();
+    }
+
+    // --- payment terms (supplier remodel) ---
+
+    /** Set the current term (the required slot once terms exist). */
+    public void setCurrentTerm(UUID termId) {
+        this.currentTermId = termId;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Set (or replace) the target term — the mid-transition slot. */
+    public void setTargetTerm(UUID termId) {
+        this.targetTermId = termId;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Promote target → current; the old current term row is retained historically (just no longer referenced). */
+    public UUID activateTarget() {
+        UUID previousCurrent = this.currentTermId;
+        this.currentTermId = this.targetTermId;
+        this.targetTermId = null;
+        this.updatedAt = Instant.now();
+        return previousCurrent;
+    }
+
+    // --- validation lifecycle (supplier remodel) ---
+
+    /**
+     * Update bank details. <strong>The control:</strong> changing them on a
+     * {@code VALIDATED} supplier reverts it to {@code PENDING} — a changed bank
+     * account on a trusted supplier is the invoice-fraud pattern this lifecycle
+     * exists to catch, so re-validation is required (friction on purpose).
+     * Returns whether it reverted, for a loud audit.
+     */
+    public boolean updateBankDetails(String accountName, String accountNumber, String sortCode) {
+        this.bankAccountName = accountName;
+        this.bankAccountNumber = accountNumber;
+        this.bankSortCode = sortCode;
+        this.updatedAt = Instant.now();
+        if (validationStatus == SupplierValidationStatus.VALIDATED) {
+            this.validationStatus = SupplierValidationStatus.PENDING;
+            return true;
+        }
+        return false;
+    }
+
+    public void setComplianceStatus(ComplianceStatus complianceStatus) {
+        this.complianceStatus = complianceStatus;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Derived: required fields present (bank details + compliance confirmed). A human still approves. */
+    public boolean isReadyForValidation() {
+        return bankAccountNumber != null && !bankAccountNumber.isBlank()
+            && complianceStatus == ComplianceStatus.CONFIRMED;
+    }
+
+    public void validate() {
+        this.validationStatus = SupplierValidationStatus.VALIDATED;
+        this.updatedAt = Instant.now();
+    }
+
+    public void unvalidate() {
+        this.validationStatus = SupplierValidationStatus.PENDING;
+        this.updatedAt = Instant.now();
+    }
+
+    /** The bank account number for general display — last 4 characters only, the rest masked. */
+    public String maskedBankAccountNumber() {
+        if (bankAccountNumber == null || bankAccountNumber.isBlank()) {
+            return null;
+        }
+        int keep = Math.min(4, bankAccountNumber.length());
+        return "•".repeat(bankAccountNumber.length() - keep) + bankAccountNumber.substring(bankAccountNumber.length() - keep);
     }
 
     /**
@@ -109,6 +209,34 @@ public class Supplier extends TenantScoped {
 
     public String getContactEmail() {
         return contactEmail;
+    }
+
+    public UUID getCurrentTermId() {
+        return currentTermId;
+    }
+
+    public UUID getTargetTermId() {
+        return targetTermId;
+    }
+
+    public SupplierValidationStatus getValidationStatus() {
+        return validationStatus;
+    }
+
+    public String getBankAccountName() {
+        return bankAccountName;
+    }
+
+    public String getBankAccountNumber() {
+        return bankAccountNumber;
+    }
+
+    public String getBankSortCode() {
+        return bankSortCode;
+    }
+
+    public ComplianceStatus getComplianceStatus() {
+        return complianceStatus;
     }
 
     public Instant getCreatedAt() {

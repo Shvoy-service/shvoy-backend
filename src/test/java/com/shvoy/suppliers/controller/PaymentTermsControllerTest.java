@@ -2,11 +2,11 @@ package com.shvoy.suppliers.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.UUID;
@@ -22,18 +22,21 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 /**
- * Same conventions as SupplierControllerTest: no class-level @Transactional
- * (see onboarding.repository.TenantIsolationTest for why), JDBC seeding, the
- * debug tenant header rather than a {companyId} path segment.
+ * The reworked typed payment terms (supplier remodel): terms_type, nullable
+ * deposit_pct, five-value anchor, current/target slots, and explicit target
+ * activation. Type-consistency and the activation flow are the focus.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@WithMockUser(roles = "ADMIN")
 class PaymentTermsControllerTest {
 
     private static final String TENANT_HEADER = "X-Debug-Company-Id";
+    private static final String USER_HEADER = "X-Debug-User-Id";
 
     @Autowired
     MockMvc mockMvc;
@@ -43,250 +46,143 @@ class PaymentTermsControllerTest {
 
     final UUID companyA = UUID.randomUUID();
     final UUID companyB = UUID.randomUUID();
+    UUID userAId;
 
     @BeforeEach
-    void seedCompanies() {
+    void seed() {
         Timestamp now = Timestamp.from(Instant.now());
         jdbcTemplate.update("INSERT INTO companies (id, name, created_at) VALUES (?, ?, ?)", companyA, "Co A", now);
         jdbcTemplate.update("INSERT INTO companies (id, name, created_at) VALUES (?, ?, ?)", companyB, "Co B", now);
+        userAId = UUID.randomUUID();
+        jdbcTemplate.update(
+            "INSERT INTO users (id, email, role, status, created_at, company_id) VALUES (?, ?, 'ADMIN', 'ACTIVE', ?, ?)",
+            userAId, "admin-a@example.com", now, companyA);
     }
 
     @AfterEach
     void cleanUp() {
+        jdbcTemplate.update("DELETE FROM supplier_audit_events WHERE company_id IN (?, ?)", companyA, companyB);
+        jdbcTemplate.update(
+            "UPDATE suppliers SET current_term_id = NULL, target_term_id = NULL WHERE company_id IN (?, ?)",
+            companyA, companyB);
         jdbcTemplate.update("DELETE FROM payment_terms WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM suppliers WHERE company_id IN (?, ?)", companyA, companyB);
+        jdbcTemplate.update("DELETE FROM users WHERE company_id IN (?, ?)", companyA, companyB);
         jdbcTemplate.update("DELETE FROM companies WHERE id IN (?, ?)", companyA, companyB);
     }
 
-    private UUID seedSupplier(UUID companyId, String name) {
+    @Test
+    void depositBalanceTermsRoundTrip() throws Exception {
+        UUID supplierId = seedSupplier(companyA);
+        mockMvc.perform(putTerms(supplierId, "",
+                "{\"termsType\":\"DEPOSIT_BALANCE\",\"depositPct\":30.0,\"anchorDateType\":\"INVOICE\",\"daysFromAnchor\":30}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.current.termsType").value("DEPOSIT_BALANCE"))
+            .andExpect(jsonPath("$.current.depositPct").value(30.0))
+            .andExpect(jsonPath("$.current.anchorDateType").value("INVOICE"));
+    }
+
+    @Test
+    void zeroDepositAndRollingRoundTripWithNullDeposit() throws Exception {
+        UUID s1 = seedSupplier(companyA);
+        mockMvc.perform(putTerms(s1, "",
+                "{\"termsType\":\"ZERO_DEPOSIT\",\"anchorDateType\":\"BL\",\"daysFromAnchor\":-5}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.current.termsType").value("ZERO_DEPOSIT"))
+            .andExpect(jsonPath("$.current.depositPct").doesNotExist());
+
+        UUID s2 = seedSupplier(companyA);
+        mockMvc.perform(putTerms(s2, "",
+                "{\"termsType\":\"ROLLING\",\"anchorDateType\":\"STATEMENT_DATE\",\"daysFromAnchor\":30}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.current.termsType").value("ROLLING"))
+            .andExpect(jsonPath("$.current.anchorDateType").value("STATEMENT_DATE"));
+    }
+
+    @Test
+    void depositBalanceWithoutPctIsRejected() throws Exception {
+        UUID supplierId = seedSupplier(companyA);
+        mockMvc.perform(putTerms(supplierId, "",
+                "{\"termsType\":\"DEPOSIT_BALANCE\",\"anchorDateType\":\"INVOICE\",\"daysFromAnchor\":30}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("INVALID_TERMS_COMBINATION"));
+    }
+
+    @Test
+    void zeroDepositWithPctIsRejected() throws Exception {
+        UUID supplierId = seedSupplier(companyA);
+        mockMvc.perform(putTerms(supplierId, "",
+                "{\"termsType\":\"ZERO_DEPOSIT\",\"depositPct\":0.0,\"anchorDateType\":\"BL\",\"daysFromAnchor\":30}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("INVALID_TERMS_COMBINATION"));
+    }
+
+    @Test
+    void statementAnchorOnNonRollingIsRejected() throws Exception {
+        UUID supplierId = seedSupplier(companyA);
+        mockMvc.perform(putTerms(supplierId, "",
+                "{\"termsType\":\"ZERO_DEPOSIT\",\"anchorDateType\":\"STATEMENT_DATE\",\"daysFromAnchor\":30}"))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("INVALID_TERMS_COMBINATION"));
+    }
+
+    @Test
+    void activatingATargetPromotesItToCurrentAndAudits() throws Exception {
+        UUID supplierId = seedSupplier(companyA);
+        mockMvc.perform(putTerms(supplierId, "",
+                "{\"termsType\":\"ZERO_DEPOSIT\",\"anchorDateType\":\"BL\",\"daysFromAnchor\":30}"))
+            .andExpect(status().isOk());
+        mockMvc.perform(putTerms(supplierId, "/target",
+                "{\"termsType\":\"DEPOSIT_BALANCE\",\"depositPct\":25.0,\"anchorDateType\":\"INVOICE\",\"daysFromAnchor\":60}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.target.termsType").value("DEPOSIT_BALANCE"));
+
+        mockMvc.perform(post("/api/suppliers/{s}/payment-terms/target/activate", supplierId)
+                .header(TENANT_HEADER, companyA).header(USER_HEADER, userAId))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.current.termsType").value("DEPOSIT_BALANCE"))
+            .andExpect(jsonPath("$.target").doesNotExist());
+
+        assertThat(auditCount(supplierId, "TERMS_TARGET_ACTIVATED")).isEqualTo(1);
+    }
+
+    @Test
+    void activatingWithNoTargetIsRejected() throws Exception {
+        UUID supplierId = seedSupplier(companyA);
+        mockMvc.perform(post("/api/suppliers/{s}/payment-terms/target/activate", supplierId)
+                .header(TENANT_HEADER, companyA).header(USER_HEADER, userAId))
+            .andExpect(status().isConflict())
+            .andExpect(jsonPath("$.code").value("NO_TARGET_TERM"));
+    }
+
+    @Test
+    void cannotSetTermsForAnotherCompanysSupplier() throws Exception {
+        UUID supplierB = seedSupplier(companyB);
+        mockMvc.perform(putTerms(supplierB, "",
+                "{\"termsType\":\"ZERO_DEPOSIT\",\"anchorDateType\":\"BL\",\"daysFromAnchor\":30}"))
+            .andExpect(status().isNotFound());
+    }
+
+    // --- helpers ---
+
+    private MockHttpServletRequestBuilder putTerms(UUID supplierId, String suffix, String body) {
+        return put("/api/suppliers/{s}/payment-terms" + suffix, supplierId)
+            .header(TENANT_HEADER, companyA).header(USER_HEADER, userAId)
+            .contentType(MediaType.APPLICATION_JSON).content(body);
+    }
+
+    private UUID seedSupplier(UUID companyId) {
         UUID id = UUID.randomUUID();
         jdbcTemplate.update(
-            "INSERT INTO suppliers (id, name, status, created_at, company_id) VALUES (?, ?, 'ACTIVE', ?, ?)",
-            id, name, Timestamp.from(Instant.now()), companyId);
+            "INSERT INTO suppliers (id, name, status, validation_status, created_at, company_id) "
+                + "VALUES (?, ?, 'ACTIVE', 'PENDING', ?, ?)",
+            id, "Supplier-" + id, Timestamp.from(Instant.now()), companyId);
         return id;
     }
 
-    // --- set (PUT) ---
-
-    @Test
-    @WithMockUser(roles = "PURCHASING")
-    void setCreatesTermsAndDerivesBalance() throws Exception {
-        UUID supplierId = seedSupplier(companyA, "Acme Corp");
-
-        mockMvc.perform(put("/api/suppliers/{id}/payment-terms", supplierId)
-                .header(TENANT_HEADER, companyA.toString())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"depositPercentage\":30,\"anchorEvent\":\"BL\",\"daysOffset\":30}"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.depositPercentage").value(30))
-            .andExpect(jsonPath("$.balancePercentage").value(70))
-            .andExpect(jsonPath("$.anchorEvent").value("BL"))
-            .andExpect(jsonPath("$.daysOffset").value(30));
-    }
-
-    @Test
-    @WithMockUser(roles = "ADMIN")
-    void setTwiceUpdatesTheExistingRowRatherThanInserting() throws Exception {
-        UUID supplierId = seedSupplier(companyA, "Acme Corp");
-
-        mockMvc.perform(put("/api/suppliers/{id}/payment-terms", supplierId)
-                .header(TENANT_HEADER, companyA.toString())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"depositPercentage\":30,\"anchorEvent\":\"BL\",\"daysOffset\":30}"))
-            .andExpect(status().isOk());
-
-        mockMvc.perform(put("/api/suppliers/{id}/payment-terms", supplierId)
-                .header(TENANT_HEADER, companyA.toString())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"depositPercentage\":50,\"anchorEvent\":\"INVOICE\",\"daysOffset\":45}"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.depositPercentage").value(50))
-            .andExpect(jsonPath("$.balancePercentage").value(50))
-            .andExpect(jsonPath("$.anchorEvent").value("INVOICE"));
-
-        Long rowCount = jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM payment_terms WHERE supplier_id = ?", Long.class, supplierId);
-        assertThat(rowCount).isEqualTo(1L);
-
-        Timestamp updatedAt = jdbcTemplate.queryForObject(
-            "SELECT updated_at FROM payment_terms WHERE supplier_id = ?", Timestamp.class, supplierId);
-        assertThat(updatedAt).isNotNull();
-    }
-
-    @Test
-    @WithMockUser(roles = "PURCHASING")
-    void setForAnotherCompanysSupplierReturnsNotFound() throws Exception {
-        UUID supplierId = seedSupplier(companyB, "Other Co");
-
-        mockMvc.perform(put("/api/suppliers/{id}/payment-terms", supplierId)
-                .header(TENANT_HEADER, companyA.toString())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"depositPercentage\":30,\"anchorEvent\":\"BL\",\"daysOffset\":30}"))
-            .andExpect(status().isNotFound())
-            .andExpect(jsonPath("$.code").value("NOT_FOUND"));
-
-        Long rowCount = jdbcTemplate.queryForObject(
-            "SELECT COUNT(*) FROM payment_terms WHERE supplier_id = ?", Long.class, supplierId);
-        assertThat(rowCount).isZero();
-    }
-
-    @Test
-    @WithMockUser(roles = "PURCHASING")
-    void setForNonexistentSupplierReturnsNotFound() throws Exception {
-        mockMvc.perform(put("/api/suppliers/{id}/payment-terms", UUID.randomUUID())
-                .header(TENANT_HEADER, companyA.toString())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"depositPercentage\":30,\"anchorEvent\":\"BL\",\"daysOffset\":30}"))
-            .andExpect(status().isNotFound())
-            .andExpect(jsonPath("$.code").value("NOT_FOUND"));
-    }
-
-    @Test
-    @WithMockUser(roles = "READ_ONLY")
-    void setIsForbiddenForReadOnlyRole() throws Exception {
-        UUID supplierId = seedSupplier(companyA, "Acme Corp");
-
-        mockMvc.perform(put("/api/suppliers/{id}/payment-terms", supplierId)
-                .header(TENANT_HEADER, companyA.toString())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"depositPercentage\":30,\"anchorEvent\":\"BL\",\"daysOffset\":30}"))
-            .andExpect(status().isForbidden())
-            .andExpect(jsonPath("$.code").value("FORBIDDEN"));
-    }
-
-    @Test
-    @WithMockUser(roles = "PURCHASING")
-    void setWithDepositAboveOneHundredReturnsValidationError() throws Exception {
-        UUID supplierId = seedSupplier(companyA, "Acme Corp");
-
-        mockMvc.perform(put("/api/suppliers/{id}/payment-terms", supplierId)
-                .header(TENANT_HEADER, companyA.toString())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"depositPercentage\":101,\"anchorEvent\":\"BL\",\"daysOffset\":30}"))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
-    }
-
-    @Test
-    @WithMockUser(roles = "PURCHASING")
-    void setWithNegativeDaysOffsetIsAccepted() throws Exception {
-        // Relaxed in 6.2: a negative offset ("due N days before the anchor") is a real payment term (Roadmap v2's "±").
-        UUID supplierId = seedSupplier(companyA, "Acme Corp");
-
-        mockMvc.perform(put("/api/suppliers/{id}/payment-terms", supplierId)
-                .header(TENANT_HEADER, companyA.toString())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"depositPercentage\":30,\"anchorEvent\":\"ARRIVAL\",\"daysOffset\":-5}"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.daysOffset").value(-5));
-    }
-
-    @Test
-    @WithMockUser(roles = "PURCHASING")
-    void setWithAnAbsurdlyLargeDaysOffsetReturnsValidationError() throws Exception {
-        UUID supplierId = seedSupplier(companyA, "Acme Corp");
-
-        mockMvc.perform(put("/api/suppliers/{id}/payment-terms", supplierId)
-                .header(TENANT_HEADER, companyA.toString())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"depositPercentage\":30,\"anchorEvent\":\"BL\",\"daysOffset\":1000}"))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
-    }
-
-    @Test
-    @WithMockUser(roles = "PURCHASING")
-    void setWithInvalidAnchorEventReturnsValidationError() throws Exception {
-        UUID supplierId = seedSupplier(companyA, "Acme Corp");
-
-        mockMvc.perform(put("/api/suppliers/{id}/payment-terms", supplierId)
-                .header(TENANT_HEADER, companyA.toString())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"depositPercentage\":30,\"anchorEvent\":\"SHIPPING\",\"daysOffset\":30}"))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
-    }
-
-    @Test
-    @WithMockUser(roles = "PURCHASING")
-    void setWithExFactoryAnchorEventIsAccepted() throws Exception {
-        UUID supplierId = seedSupplier(companyA, "Acme Corp");
-
-        mockMvc.perform(put("/api/suppliers/{id}/payment-terms", supplierId)
-                .header(TENANT_HEADER, companyA.toString())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"depositPercentage\":30,\"anchorEvent\":\"EX_FACTORY\",\"daysOffset\":30}"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.anchorEvent").value("EX_FACTORY"));
-    }
-
-    /** Consolidation ticket: PO confirmed fractional deposit % is allowed up to 1dp, not more. */
-    @Test
-    @WithMockUser(roles = "PURCHASING")
-    void setWithDepositPercentageBeyondOneDecimalPlaceReturnsValidationError() throws Exception {
-        UUID supplierId = seedSupplier(companyA, "Acme Corp");
-
-        mockMvc.perform(put("/api/suppliers/{id}/payment-terms", supplierId)
-                .header(TENANT_HEADER, companyA.toString())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"depositPercentage\":33.55,\"anchorEvent\":\"BL\",\"daysOffset\":30}"))
-            .andExpect(status().isBadRequest())
-            .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"));
-    }
-
-    @Test
-    @WithMockUser(roles = "PURCHASING")
-    void setWithDepositPercentageAtOneDecimalPlaceIsAccepted() throws Exception {
-        UUID supplierId = seedSupplier(companyA, "Acme Corp");
-
-        mockMvc.perform(put("/api/suppliers/{id}/payment-terms", supplierId)
-                .header(TENANT_HEADER, companyA.toString())
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"depositPercentage\":33.5,\"anchorEvent\":\"BL\",\"daysOffset\":30}"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.depositPercentage").value(33.5));
-    }
-
-    // --- get ---
-
-    @Test
-    @WithMockUser(roles = "READ_ONLY")
-    void getReturnsTermsForAnyAuthenticatedRole() throws Exception {
-        UUID supplierId = seedSupplier(companyA, "Acme Corp");
-        jdbcTemplate.update(
-            "INSERT INTO payment_terms (supplier_id, company_id, deposit_percentage, anchor_event, days_offset, "
-                + "created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            supplierId, companyA, new BigDecimal("33.50"), "ARRIVAL", 15, Timestamp.from(Instant.now()));
-
-        mockMvc.perform(get("/api/suppliers/{id}/payment-terms", supplierId).header(TENANT_HEADER, companyA.toString()))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.depositPercentage").value(33.5))
-            .andExpect(jsonPath("$.balancePercentage").value(66.5))
-            .andExpect(jsonPath("$.anchorEvent").value("ARRIVAL"))
-            .andExpect(jsonPath("$.daysOffset").value(15));
-    }
-
-    @Test
-    @WithMockUser(roles = "READ_ONLY")
-    void getBeforeTermsAreSetReturnsNotFound() throws Exception {
-        UUID supplierId = seedSupplier(companyA, "Acme Corp");
-
-        mockMvc.perform(get("/api/suppliers/{id}/payment-terms", supplierId).header(TENANT_HEADER, companyA.toString()))
-            .andExpect(status().isNotFound())
-            .andExpect(jsonPath("$.code").value("NOT_FOUND"));
-    }
-
-    @Test
-    @WithMockUser(roles = "READ_ONLY")
-    void getForAnotherCompanysSupplierReturnsNotFound() throws Exception {
-        UUID supplierId = seedSupplier(companyB, "Other Co");
-        jdbcTemplate.update(
-            "INSERT INTO payment_terms (supplier_id, company_id, deposit_percentage, anchor_event, days_offset, "
-                + "created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            supplierId, companyB, new BigDecimal("30.00"), "BL", 30, Timestamp.from(Instant.now()));
-
-        mockMvc.perform(get("/api/suppliers/{id}/payment-terms", supplierId).header(TENANT_HEADER, companyA.toString()))
-            .andExpect(status().isNotFound())
-            .andExpect(jsonPath("$.code").value("NOT_FOUND"));
+    private int auditCount(UUID supplierId, String eventType) {
+        return jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM supplier_audit_events WHERE supplier_id = ? AND event_type = ?",
+            Integer.class, supplierId, eventType);
     }
 }
