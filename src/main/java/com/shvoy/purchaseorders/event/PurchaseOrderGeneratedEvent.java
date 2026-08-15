@@ -1,5 +1,6 @@
 package com.shvoy.purchaseorders.event;
 
+import java.time.LocalDate;
 import java.util.UUID;
 
 import org.springframework.modulith.NamedInterface;
@@ -23,7 +24,9 @@ import com.shvoy.Money;
  * both null when the supplier has no payment terms configured, so no split
  * exists) rather than just the id, so a listener never has to call back into
  * this module to read them. The amounts are the 4.3 split as snapshotted at
- * generation.
+ * generation. {@code supplierId} and {@code generationDate} were added in 6.2
+ * so the payments module can resolve the schedule terms and set the deposit's
+ * due date (the generation date) without a call-back.
  *
  * <p>Exposed via {@code @NamedInterface} so another module may depend on the
  * event type without reaching into the rest of {@code purchaseorders}.
@@ -31,6 +34,8 @@ import com.shvoy.Money;
 @NamedInterface("po-events")
 public record PurchaseOrderGeneratedEvent(
     UUID purchaseOrderId,
+    UUID supplierId,
+    LocalDate generationDate,
     Money orderTotal,
     Money deposit,
     Money balance

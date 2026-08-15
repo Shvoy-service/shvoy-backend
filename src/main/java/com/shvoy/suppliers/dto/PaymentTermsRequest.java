@@ -5,8 +5,9 @@ import java.math.BigDecimal;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Digits;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.PositiveOrZero;
 
 import com.shvoy.suppliers.domain.AnchorEvent;
 
@@ -26,6 +27,8 @@ import com.shvoy.suppliers.domain.AnchorEvent;
 public record PaymentTermsRequest(
     @NotNull @DecimalMin("0") @DecimalMax("100") @Digits(integer = 3, fraction = 1) BigDecimal depositPercentage,
     @NotNull AnchorEvent anchorEvent,
-    @NotNull @PositiveOrZero Integer daysOffset
+    // Signed, per Roadmap v2's "anchor date ± days": a negative offset ("payment due N days *before* arrival")
+    // is a real term, so this is no longer @PositiveOrZero (relaxed in 6.2). Bounded to ±365 to stay sane.
+    @NotNull @Min(-365) @Max(365) Integer daysOffset
 ) {
 }

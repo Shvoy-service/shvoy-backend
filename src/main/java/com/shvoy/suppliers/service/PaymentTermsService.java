@@ -13,6 +13,7 @@ import com.shvoy.TenantGuard;
 import com.shvoy.suppliers.domain.PaymentSplit;
 import com.shvoy.suppliers.domain.PaymentTerms;
 import com.shvoy.suppliers.domain.Supplier;
+import com.shvoy.suppliers.dto.PaymentScheduleTerms;
 import com.shvoy.suppliers.dto.PaymentTermsRequest;
 import com.shvoy.suppliers.dto.PaymentTermsResponse;
 import com.shvoy.suppliers.repository.PaymentTermsRepository;
@@ -79,6 +80,19 @@ public class PaymentTermsService {
     @Transactional(readOnly = true)
     public Optional<PaymentSplit> trySplit(UUID supplierId, Money total) {
         return paymentTermsRepository.findById(supplierId).map(terms -> terms.split(total));
+    }
+
+    /**
+     * Story 6.2's cross-module surface — the anchor event + signed offset the
+     * payments module snapshots to schedule a balance's due date. Empty when
+     * the supplier has no terms configured (a balance then has no calculable
+     * due date). Same {@code @NamedInterface} contract as {@link #trySplit},
+     * exposing only the schedule-relevant fields, never {@code PaymentTerms}.
+     */
+    @Transactional(readOnly = true)
+    public Optional<PaymentScheduleTerms> getScheduleTerms(UUID supplierId) {
+        return paymentTermsRepository.findById(supplierId)
+            .map(terms -> new PaymentScheduleTerms(terms.getAnchorEvent(), terms.getDaysOffset()));
     }
 
     private void findOwnSupplier(UUID id) {
