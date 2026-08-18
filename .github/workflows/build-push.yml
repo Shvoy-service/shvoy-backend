@@ -1,0 +1,80 @@
+name: Build & push image
+
+# On merge to main, build the production image and push it to ECR tagged
+# sha-<short-sha>. Deploying that image to dev is a separate, manual step
+# (see deploy-dev.yml). Requires the AWS OIDC deploy role — see
+# docs/aws/A8-cicd-deploy-role.md; until AWS_DEPLOY_ROLE_ARN is set as a repo
+# variable and that role exists, this workflow cannot authenticate to AWS.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# Don't cancel an in-flight build: each main commit is a distinct sha and we want
+# every one to get an image (so any of them can be deployed later).
+concurrency:
+  group: build-push-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write   # for the OIDC token exchange with AWS
+  contents: read
+
+env:
+  AWS_REGION: eu-west-2
+  ECR_REGISTRY: 038774852612.dkr.ecr.eu-west-2.amazonaws.com
+  ECR_REPOSITORY: shvoy-dev-backend
+
+jobs:
+  build-push:
+    name: Build ARM64 image & push to ECR
+    # Native ARM64 runner — Fargate runs ARM64 (the task definition pins it), so a
+    # native build avoids emulating the whole Maven build under QEMU on x86.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Compute image tag
+        id: tag
+        run: echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # The ECR repo is IMMUTABLE (A6): re-pushing an existing tag fails. Skip the
+      # build when this sha's image is already there (e.g. a re-run of the workflow).
+      - name: Skip if this tag is already in ECR
+        id: exists
+        run: |
+          if aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+               --image-ids imageTag="${{ steps.tag.outputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Image ${{ steps.tag.outputs.tag }} already in ECR — nothing to build."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push (ARM64)
+        if: steps.exists.outputs.exists == 'false'
+        run: |
+          IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:${{ steps.tag.outputs.tag }}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Image pushed"
+            echo "- Tag: \`${{ steps.tag.outputs.tag }}\`"
+            echo "- Repo: \`$ECR_REGISTRY/$ECR_REPOSITORY\`"
+            echo ""
+            echo "Deploy it with the **Deploy to dev** workflow (\`workflow_dispatch\`), passing this tag."
+          } >> "$GITHUB_STEP_SUMMARY"
