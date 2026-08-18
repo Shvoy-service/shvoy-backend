@@ -9,8 +9,10 @@ import com.shvoy.shipments.domain.ReceiptStatus;
 /**
  * A PO's portion of a shipment, as read back (Story 7.2) — its own packing list
  * and inspection report (structured fields + stored-file references) and its
- * receipt status. ETD/arrival fields exist on the entity but belong to 7.5/7.6,
- * so they're not surfaced here yet.
+ * receipt status. {@code confirmedEtd} is the supplier's confirmed departure
+ * (7.5); the signed delta vs the PO's requested ETD and the revision history are
+ * served by the dedicated ETD read ({@code GET .../shipment/etd}), composed onto
+ * this view by the frontend.
  */
 public record ConsignmentResponse(
     UUID consignmentId,
@@ -24,6 +26,7 @@ public record ConsignmentResponse(
     String inspectionReportS3Key,
     ReceiptStatus receiptStatus,
     boolean receiptEligible,
+    LocalDate confirmedEtd,
     Instant createdAt,
     Instant updatedAt
 ) {

@@ -69,6 +69,7 @@ class ShipmentDocumentRecordingService {
     private final PackingListLineRepository packingListLineRepository;
     private final InspectionReportRepository inspectionReportRepository;
     private final PurchaseOrderService purchaseOrderService;
+    private final ConsignmentProvisioningService consignmentProvisioningService;
     private final S3Client s3Client;
     private final String documentsBucket;
 
@@ -77,7 +78,7 @@ class ShipmentDocumentRecordingService {
             ShipmentDocumentAuditEventRepository auditRepository,
             PackingListLineRepository packingListLineRepository,
             InspectionReportRepository inspectionReportRepository,
-            PurchaseOrderService purchaseOrderService, S3Client s3Client,
+            PurchaseOrderService purchaseOrderService, ConsignmentProvisioningService consignmentProvisioningService, S3Client s3Client,
             @Value("${aws.s3.documents-bucket}") String documentsBucket) {
         this.shipmentRepository = shipmentRepository;
         this.consignmentRepository = consignmentRepository;
@@ -85,6 +86,7 @@ class ShipmentDocumentRecordingService {
         this.packingListLineRepository = packingListLineRepository;
         this.inspectionReportRepository = inspectionReportRepository;
         this.purchaseOrderService = purchaseOrderService;
+        this.consignmentProvisioningService = consignmentProvisioningService;
         this.s3Client = s3Client;
         this.documentsBucket = documentsBucket;
     }
@@ -243,21 +245,11 @@ class ShipmentDocumentRecordingService {
 
     /**
      * Find the PO's existing consignment, or create the shipment + consignment on
-     * first document. Ownership/readiness is asserted on the create path; the
-     * reuse path only matches consignments in the caller's own tenant (findAll is
-     * tenant-scoped), so a cross-tenant PO id falls through to the create path and
-     * is rejected there with a 404.
+     * first document — delegated to the shared {@link ConsignmentProvisioningService}
+     * (7.5) so document logging and ETD logging use one first-touch path.
      */
     private ShipmentConsignment resolveOrCreateConsignment(UUID purchaseOrderId) {
-        Optional<ShipmentConsignment> existing = consignmentRepository.findAll().stream()
-            .filter(c -> c.getPurchaseOrderId().equals(purchaseOrderId) && !c.isDetached())
-            .findFirst();
-        if (existing.isPresent()) {
-            return existing.get();
-        }
-        purchaseOrderService.assertOwnPurchaseOrderReadyForShipment(purchaseOrderId);
-        Shipment shipment = shipmentRepository.save(new Shipment(null, null, null, null));
-        return consignmentRepository.save(new ShipmentConsignment(shipment.getId(), purchaseOrderId));
+        return consignmentProvisioningService.resolveOrCreate(purchaseOrderId);
     }
 
     /** Full-replace the consignment's packing-list line quantities (Story 7.4) — the provisional GRN snapshots from these. */
