@@ -15,6 +15,32 @@ Living reference for decisions the frontend and backend must implement identical
 - Registration and invite-acceptance remain unauthenticated by design (no account/tenant exists yet at that point) — see `POST /api/onboarding/register`, `POST /api/onboarding/activate`, `POST /api/onboarding/invite/accept`.
 - `local`/`test` environments run with authentication disabled entirely (no Cognito dependency) — not representative of dev/prod request shape.
 
+### Current-user session context — `GET /api/me`
+
+The frontend's session bootstrap: one authenticated call returning who you are in SHVOY terms, so the client knows what to render and which screens to gate — **without custom token claims**. This is *why `/me` beat custom claims*: the token authenticates; this endpoint says who you are. In the `onboarding` module (it's a user-profile read); it exposes the same `cognito_sub → profile` lookup that already runs on every authenticated request.
+
+| Method | Path | Role | Notes |
+|---|---|---|---|
+| `GET` | `/api/me` | Any authenticated (every role, `READ_ONLY` included) | The authenticated user's own context, resolved from the token's `sub`. **No parameters, no user id in the path** — nothing to tamper with. |
+
+Response — **the contract** (the single most type-bound response in the API; the frontend generates its types from this and gates its whole UI off `role`, so additions are safe but a **rename/removal is breaking** — a serialisation test locks the exact field set):
+
+```json
+{
+  "userId": "<uuid>",
+  "email": "user@company.com",
+  "role": "FINANCE",
+  "companyId": "<uuid>",
+  "companyName": "Acme Imports Ltd",
+  "status": "ACTIVE"
+}
+```
+
+- `role` / `status` are the enum strings (five roles; `PENDING`/`ACTIVE`/`INACTIVE`). `companyName` is included so the client renders company context without a second round-trip.
+- **Deliberately excluded:** approver-pool membership (checked server-side at sign-off time — a contextual fetch later if the UI wants it, not session bootstrap), any permissions list (the `role` is the contract; enumerating permissions invites a parallel client-side authz model), and anything sensitive (no `cognito_sub` — the client has the token, it never needs the linkage).
+- **Display guidance, not authorization.** The server re-checks role / tenancy / status on every subsequent request regardless of what `/me` returned. This is the principle that made `/me` beat custom claims — do not "optimise" later by trusting the client.
+- **Status handling** (the endpoint's own, so it holds under `local`/`test` where the JWT converter's `ACTIVE` gate doesn't run): unresolvable identity → stable `401`/`UNAUTHENTICATED`, never a 500; `INACTIVE` → rejected (consistent with the deactivation rule); `PENDING` → **returned with its status** so the frontend routes to activation rather than dead-ending on a 403. (In dev/prod the resource-server layer admits only `ACTIVE` identities upstream anyway, so those branches are belt-to-its-braces.) The `local` profile, with no debug user header, returns a coherent mock (`local-dev@shvoy.local`, `ADMIN`, `ACTIVE`, in the default tenant) so a frontend dev never gets an error.
+
 ---
 
 ## Email delivery (the `EmailSender` seam)
