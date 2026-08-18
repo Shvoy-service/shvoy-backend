@@ -235,7 +235,14 @@ public class ThreeWayMatchService {
     }
 
     private void applyBalanceGate(UUID poId, Payment balance, List<Invoice> invoices, Map<UUID, Verdict> verdicts) {
-        if (balance == null || !balance.isMatchMutable()) {
+        if (balance == null) {
+            return;
+        }
+        boolean held = balance.getStatus() == PaymentStatus.ON_HOLD;
+        // A PAID or match-overridden payment is settled — the match never touches it. A HELD payment IS
+        // touched, but only to re-assert a failure: the system's verdict wins over a hold when the match now
+        // fails (Story 6.8), while a passing/incomplete re-match leaves the human hold standing.
+        if (!balance.isMatchMutable() && !held) {
             return;
         }
         List<Invoice> nonDeposit = invoices.stream()
@@ -244,6 +251,9 @@ public class ThreeWayMatchService {
         if (failure != null) {
             block(poId, balance, failure);
             return;
+        }
+        if (held) {
+            return; // a clean/incomplete re-match doesn't lift a hold — Finance releases it explicitly
         }
         boolean completingBalancePassed = nonDeposit.stream()
             .anyMatch(inv -> inv.getCoversType() == InvoiceCoversType.BALANCE && verdicts.get(inv.getId()).passed());
@@ -284,12 +294,16 @@ public class ThreeWayMatchService {
     }
 
     private void block(UUID poId, Payment payment, String detail) {
-        boolean changed = payment.getStatus() != PaymentStatus.BLOCKED
-            || !Objects.equals(payment.getMatchDetail(), detail);
+        PaymentStatus prior = payment.getStatus();
+        boolean changed = prior != PaymentStatus.BLOCKED || !Objects.equals(payment.getMatchDetail(), detail);
         payment.markMatchBlocked(detail);
         paymentRepository.save(payment);
         if (changed) {
-            paymentAuditService.record(payment.getId(), poId, PaymentAuditEventType.MATCH_BLOCKED, detail);
+            // Both facts (Story 6.8): a hold placed by Finance is overridden by the system's re-asserted failure.
+            String auditDetail = prior == PaymentStatus.ON_HOLD
+                ? "Re-match failed while ON_HOLD → BLOCKED (the hold is moot against a failed match). " + detail
+                : detail;
+            paymentAuditService.record(payment.getId(), poId, PaymentAuditEventType.MATCH_BLOCKED, auditDetail);
         }
         discrepancyCaseService.onMatchBlocked(payment, detail);
     }
