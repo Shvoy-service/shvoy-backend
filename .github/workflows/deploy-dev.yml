@@ -30,7 +30,7 @@ env:
   AWS_REGION: eu-west-2
   ECR_REGISTRY: 038774852612.dkr.ecr.eu-west-2.amazonaws.com
   ECR_REPOSITORY: shvoy-dev-backend
-  ECS_SERVICE: shvoy-dev-backend
+  ECS_SERVICE_ARN: arn:aws:ecs:eu-west-2:038774852612:service/default/shvoy-dev-backend
   TASK_FAMILY: shvoy-dev-backend
   CONTAINER_NAME: Main
   HEALTH_CHECK_PATH: /actuator/health
@@ -76,7 +76,7 @@ jobs:
       - name: Roll out via Express Mode
         run: |
           aws ecs update-express-gateway-service \
-            --service-name "$ECS_SERVICE" \
+            --service-arn "$ECS_SERVICE_ARN" \
             --task-definition-arn "${{ steps.taskdef.outputs.arn }}" \
             --health-check-path "$HEALTH_CHECK_PATH"
 

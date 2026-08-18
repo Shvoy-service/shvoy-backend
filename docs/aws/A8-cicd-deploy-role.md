@@ -42,10 +42,8 @@ reuse it.)
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
-        },
-        "StringLike": {
-          "token.actions.githubusercontent.com:sub": "repo:Shvoy-service/shvoy-backend:*"
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+          "token.actions.githubusercontent.com:sub": "repo:Shvoy-service@312544870/shvoy-backend@1329642395:ref:refs/heads/main"
         }
       }
     }
@@ -53,9 +51,18 @@ reuse it.)
 }
 ```
 
-> Tighten `sub` later if you want (e.g. `repo:Shvoy-service/shvoy-backend:ref:refs/heads/main`
-> for build-push, and an environment condition for deploy) — the wildcard is the
-> simple starting point for a single-maintainer pilot.
+> **Immutable subject claims (this account) — the gotcha that cost us an afternoon.** GitHub issues
+> this account's OIDC tokens with *immutable* org/repo IDs baked into the `sub` —
+> `repo:Shvoy-service@312544870/shvoy-backend@1329642395:ref:...`, **not** the plain names. A
+> name-based `sub` (`repo:Shvoy-service/shvoy-backend:...`) silently fails to match, giving
+> `Not authorized to perform sts:AssumeRoleWithWebIdentity` with everything else correct. The `@<id>`
+> form above is right and rename-proof.
+>
+> Both workflows run from `main`, so this single `sub` (pinned to `:ref:refs/heads/main`) covers
+> build-push and deploy-dev. To see the exact `sub` for any repo/ref, decode the token in a workflow
+> via `core.getIDToken('sts.amazonaws.com')` and print `claims.sub` (never the token itself). The
+> `@<id>` numbers are the org id (`312544870`) and repo id (`1329642395`) — check
+> `gh api /repos/Shvoy-service/shvoy-backend/actions/oidc/customization/sub` if they ever change.
 
 ---
 
