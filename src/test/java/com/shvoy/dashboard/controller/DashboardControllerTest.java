@@ -154,7 +154,7 @@ class DashboardControllerTest {
 
         mockMvc.perform(get("/api/dashboard").header(TENANT, companyA.toString()))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.*", hasSize(3))) // exactly stats, payments, alerts
+            .andExpect(jsonPath("$.*", hasSize(4))) // stats, payments, priceWarnings, alerts
             .andExpect(jsonPath("$.stats.overduePayments").exists())
             .andExpect(jsonPath("$.stats.dueWithinFiveDays").exists())
             .andExpect(jsonPath("$.stats.openDiscrepancies").exists())
@@ -168,6 +168,8 @@ class DashboardControllerTest {
             .andExpect(jsonPath("$.payments[0].status").value("PENDING"))
             .andExpect(jsonPath("$.payments[0].overdue").value(false))
             .andExpect(jsonPath("$.payments[0].*", hasSize(7)))
+            .andExpect(jsonPath("$.priceWarnings").isArray())
+            .andExpect(jsonPath("$.priceWarnings", hasSize(0))) // 9.2: no expiring prices seeded here
             .andExpect(jsonPath("$.alerts").isArray())
             .andExpect(jsonPath("$.alerts", hasSize(0))); // 9.3's slot, empty from day one
     }
@@ -181,6 +183,7 @@ class DashboardControllerTest {
             .andExpect(jsonPath("$.stats.dueWithinFiveDays").value(0))
             .andExpect(jsonPath("$.stats.openDiscrepancies").value(0))
             .andExpect(jsonPath("$.payments", hasSize(0)))
+            .andExpect(jsonPath("$.priceWarnings", hasSize(0)))
             .andExpect(jsonPath("$.alerts", hasSize(0)));
     }
 

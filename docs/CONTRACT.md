@@ -953,14 +953,38 @@ Response — pin this shape (the frontend types against it, same discipline as `
       "amount": { "amount": "12500.00", "currency": "USD" }, "dueDate": "2026-09-02",
       "status": "PENDING", "overdue": true }
   ],
+  "priceWarnings": [
+    { "supplierId": "…", "supplierName": "Acme Imports", "status": "EXPIRED",
+      "expiredCount": 2, "neverPricedCount": 1, "expiringCount": 0, "earliestExpiry": null }
+  ],
   "alerts": []
 }
 ```
+
+`priceWarnings` (9.2, below) is a capped digest of the supplier price-file rollup — added additively, exactly as the `alerts` slot anticipated; the shape grew compatibly. `alerts` stays `[]` (9.3's slot).
 
 - **Composition, never recomputation.** The three stats come from the existing operations — `overduePayments`/`dueWithinFiveDays` from 6.3's `getStats()`, `openDiscrepancies` from 6.6's open-case `stats()`; the rows from 6.3's default queue view. The `dashboard` module holds **no** overdue / due-window / open-case logic of its own — a second calculation is exactly the drift this reuse prevents (if the dashboard's overdue count ever disagreed with the payments screen, that's the bug). Delivered through a narrow `payments`-owned `@NamedInterface("payment-dashboard")` facade (`PaymentDashboardService`) that *delegates* to those operations; the dashboard composes and shapes.
 - **Rows are a digest, capped at 10**, soonest-due first, undated (awaiting-anchor) grouped last, unpaid only, each with the derived `overdue` flag — the exact rows 6.3's queue produces, narrowed. The full, paginated queue is one click away in the Payments view; **the dashboard doesn't paginate.** The boundaries inherit as-pinned from 6.3 (overdue = strictly past due; due-within-5 inclusive of day 5).
 - **`alerts` ships as an empty array from day one** — it's 9.3's banner slot. Shipping the field now makes 9.3 additive for the frontend, not a contract change. Price-expiry warnings (9.2) join as a further field when that story defines them, not speculatively.
 - **No caching** — the most-hit endpoint fans out to a few queries, which is fine at pilot scale; a cached overdue count that survives a Pay action is a worse bug than a slow query. The row join already batches PO + supplier lookups (no N+1). Tenant-scoped through the reused operations; an integration test asserts the whole composed response contains nothing of another tenant's.
+
+### Price-expiry warnings (Story 9.2)
+
+The proactive end of the expired-price control — Screen 2's "expired price file rows highlighted" and the roadmap's "no silent reuse of stale pricing." The 4.5 PO-creation gate is the *enforcement*; this is the early warning that stops anyone hitting that gate surprised. In `suppliers` (a price-data question), surfaced on the dashboard. Derived at read time over 3.4's `SkuPrice` validity windows — no new state, a new query.
+
+| Method | Path | Role | Notes |
+|---|---|---|---|
+| `GET` | `/api/suppliers/price-warnings` | Any authenticated | Every active supplier with an expired or expiring-soon price file — the full, **uncapped** rollup (Screen 2), expired-first then by earliest expiry. |
+| `GET` | `/api/suppliers/{supplierId}/price-warnings` | Any authenticated | The per-SKU drill-down beneath one supplier's rollup — which SKUs warn and why (`LAPSED` / `NEVER_PRICED` / `EXPIRING`, with `validTo`). |
+
+- **Supplier-grain rollup.** A derived `PriceFileStatus` per active supplier, from its active SKUs' *current-price* resolution:
+  - **`EXPIRED`** — ≥1 active SKU has **no valid price today** (its window lapsed, or it was never priced — the two 4.5-distinguished cases, kept distinguishable underneath: `neverPricedCount` is the subset of `expiredCount`).
+  - **`EXPIRING_SOON`** — none expired, but ≥1 current price's `validTo` is within the window.
+  - **`IN_DATE`** — everything valid beyond the window; omitted from the warnings list.
+- **The reuse that matters (pinned).** "Has a valid price today" is defined by **3.8's resolver** (`PriceResolutionService#resolve` → `priceFound`), *not* a fresh `validTo < today` query — so this warning, the 4.5 gate, and the resolver can never disagree (the open-ended-null edge, most likely). For "expiring soon" the rollup reads the `validTo` of the price the resolver **already chose** (by its `skuPriceId`), never re-deriving which window is current.
+- **The warning window — 14 days, inclusive** (`WARNING_WINDOW_DAYS`, MVP constant). A current price warns when `validTo ≤ today + 14`. Boundaries, stated once: a price expiring **today** is still **in-date** today (so `EXPIRING_SOON`, not `EXPIRED`); `validTo = today+14` warns, `today+15` does not; expiry means *no valid price today*. **Open-ended prices (`validTo` null) are永 in-date and never warn.** A candidate per-account setting later — **not built now** (constant first, config when someone asks — the tolerance lesson).
+- **`EXPIRED` dominates the rollup** — a supplier with both an expired and an expiring SKU shows `EXPIRED` (and its `earliestExpiry` is null — moot once already expired). Counts (`expiredCount`, `neverPricedCount`, `expiringCount`, `earliestExpiry`) ride the rollup; the per-SKU cases are the drill-down.
+- **Dashboard integration.** 9.1's response carries `priceWarnings` — the same rollup, **capped at 10, expired-first** (empty when all's well). Ordering lives in the operation (single source); the dashboard only caps. **No new stat tile** — price warnings are a list section, not a fourth tile the wireframe didn't ask for. All derived at read time: a price uploaded *now* clears the warning on the next read — no job, no cache (tested end to end). Anti-drift asserted (the dashboard section equals the standalone operation), the same tripwire as 9.1.
 
 ---
 
