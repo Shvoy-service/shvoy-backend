@@ -31,5 +31,11 @@ public enum ShipmentDocumentAuditEventType {
     /** A subsequent PASS released a rework hold (Story 7.4 revised). */
     REWORK_RELEASED,
     /** A provisional GRN was created despite a failed inspection — flagged qc_failed (Story 7.4 revised). */
-    GRN_QC_FAILED
+    GRN_QC_FAILED,
+    /** Physical arrival confirmed against the provisional GRN with no shortfall (Story 7.6). */
+    ARRIVAL_CONFIRMED,
+    /** Arrival confirmed but the counts differed from the GRN — a discrepancy record was raised (Story 7.6). */
+    ARRIVAL_DISCREPANCY_RAISED,
+    /** A confirmed arrival's date was corrected — the ARRIVAL anchor re-publishes (Story 7.6). */
+    ARRIVAL_DATE_CORRECTED
 }
