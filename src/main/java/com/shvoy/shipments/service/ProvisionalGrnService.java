@@ -45,13 +45,16 @@ public class ProvisionalGrnService {
     private final ApplicationEventPublisher eventPublisher;
     private final ShipmentConsignmentRepository consignmentRepository;
     private final GoodsReceiptLineRepository goodsReceiptLineRepository;
+    private final ReceiptRollupService receiptRollupService;
 
     ProvisionalGrnService(ProvisionalGrnRecordingService recordingService, ApplicationEventPublisher eventPublisher,
-            ShipmentConsignmentRepository consignmentRepository, GoodsReceiptLineRepository goodsReceiptLineRepository) {
+            ShipmentConsignmentRepository consignmentRepository, GoodsReceiptLineRepository goodsReceiptLineRepository,
+            ReceiptRollupService receiptRollupService) {
         this.recordingService = recordingService;
         this.eventPublisher = eventPublisher;
         this.consignmentRepository = consignmentRepository;
         this.goodsReceiptLineRepository = goodsReceiptLineRepository;
+        this.receiptRollupService = receiptRollupService;
     }
 
     public GoodsReceiptResponse create(UUID purchaseOrderId) {
@@ -66,12 +69,28 @@ public class ProvisionalGrnService {
                     result.purchaseOrderId(), e);
             }
         }
+        reassessClosure(purchaseOrderId);
         return getForPurchaseOrder(purchaseOrderId);
     }
 
     public GoodsReceiptResponse amend(UUID purchaseOrderId, AmendGoodsReceiptRequest request) {
         publish(recordingService.amend(purchaseOrderId, request));
+        reassessClosure(purchaseOrderId);
         return getForPurchaseOrder(purchaseOrderId);
+    }
+
+    /**
+     * Re-evaluate PO closure from the now-committed cumulative receipt (receipt
+     * rollup &amp; PO closure). Best-effort like the seam publish — the GRN is
+     * already durable; a closure hiccup is re-evaluated on the next receipt event
+     * rather than failing the receipt.
+     */
+    private void reassessClosure(UUID purchaseOrderId) {
+        try {
+            receiptRollupService.reassessClosure(purchaseOrderId);
+        } catch (RuntimeException e) {
+            log.warn("Closure re-assessment failed for PO {} — the GRN remains recorded", purchaseOrderId, e);
+        }
     }
 
     /** Publish the GRN to the 6.2/6.1-style seam best-effort — a downstream failure never fails the committed receipt. */

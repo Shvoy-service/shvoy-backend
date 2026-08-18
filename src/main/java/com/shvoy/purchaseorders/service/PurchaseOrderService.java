@@ -228,7 +228,71 @@ public class PurchaseOrderService {
      */
     @Transactional(readOnly = true)
     public void assertOwnPurchaseOrderReadyForInvoice(UUID id) {
-        assertFinalised(id, ErrorCode.PO_NOT_READY_FOR_INVOICE, "an invoice");
+        // Invoices legitimately arrive AFTER completion (the balance invoice typically follows full receipt), so
+        // CLOSED / CLOSED_SHORT are allowed here — closure is a receipt-side fact, not a financial freeze
+        // (receipt rollup & PO closure). Only a still-DRAFT PO has nothing to invoice against.
+        PurchaseOrder purchaseOrder = findOwnPurchaseOrder(id);
+        PurchaseOrderStatus status = purchaseOrder.getStatus();
+        boolean invoiceable = status == PurchaseOrderStatus.GENERATED || status == PurchaseOrderStatus.SENT
+            || status == PurchaseOrderStatus.CLOSED || status == PurchaseOrderStatus.CLOSED_SHORT;
+        if (!invoiceable) {
+            throw new ConflictException(ErrorCode.PO_NOT_READY_FOR_INVOICE,
+                "Purchase order is not ready for an invoice in status " + status);
+        }
+    }
+
+    /**
+     * Receipt rollup &amp; PO closure — the receipt side (shipments) calls this on
+     * every receipted/amended event with the assessment it derived. Closure is an
+     * <strong>observed fact</strong>: complete (received = ordered per SKU) closes
+     * a finalised PO ({@code SENT}/{@code GENERATED} → {@code CLOSED}, audited as a
+     * system action); a subsequent amendment that un-completes it reopens
+     * ({@code CLOSED} → {@code SENT}, audited loudly). A manual {@code CLOSED_SHORT}
+     * is never touched here. The over-delivery flag is stamped alongside.
+     */
+    @Transactional
+    public void applyReceiptClosure(UUID id, boolean fullyReceived, boolean overDelivered) {
+        PurchaseOrder purchaseOrder = findOwnPurchaseOrder(id);
+        if (purchaseOrder.isOverDelivered() != overDelivered) {
+            purchaseOrder.applyOverDelivered(overDelivered);
+            audit(purchaseOrder, overDelivered
+                    ? com.shvoy.purchaseorders.domain.PurchaseOrderAuditEventType.OVER_DELIVERY_FLAGGED
+                    : com.shvoy.purchaseorders.domain.PurchaseOrderAuditEventType.OVER_DELIVERY_CLEARED,
+                "Cumulative received " + (overDelivered ? "exceeds" : "no longer exceeds") + " ordered on a SKU");
+        }
+        PurchaseOrderStatus status = purchaseOrder.getStatus();
+        if (fullyReceived
+                && (status == PurchaseOrderStatus.SENT || status == PurchaseOrderStatus.GENERATED)) {
+            purchaseOrder.closeOnReceipt();
+            audit(purchaseOrder, com.shvoy.purchaseorders.domain.PurchaseOrderAuditEventType.PO_CLOSED_ON_RECEIPT,
+                "Cumulative received = ordered per SKU — closed on receipt (system)");
+        } else if (!fullyReceived && status == PurchaseOrderStatus.CLOSED) {
+            purchaseOrder.reopenFromReceipt();
+            audit(purchaseOrder, com.shvoy.purchaseorders.domain.PurchaseOrderAuditEventType.PO_REOPENED_ON_AMENDMENT,
+                "A GRN amendment un-completed receipt — reopened CLOSED → SENT (system)");
+        }
+        purchaseOrderRepository.save(purchaseOrder);
+    }
+
+    /**
+     * Receipt rollup &amp; PO closure — the manual escape valve. A Finance/Admin
+     * write-off of a remainder that will never ship (authority enforced at the
+     * calling controller). Distinct terminal state {@code CLOSED_SHORT}: "complete"
+     * and "abandoned remainder" are different facts. Requires a reason; the
+     * outstanding value (derived by the caller) is recorded on the audit.
+     */
+    @Transactional
+    public void closeShort(UUID id, String reason, String outstandingDetail) {
+        PurchaseOrder purchaseOrder = findOwnPurchaseOrder(id);
+        PurchaseOrderStatus status = purchaseOrder.getStatus();
+        if (status != PurchaseOrderStatus.GENERATED && status != PurchaseOrderStatus.SENT) {
+            throw new ConflictException(ErrorCode.INVALID_STATUS_TRANSITION,
+                "Only a finalised, still-open PO can be closed short — status is " + status);
+        }
+        purchaseOrder.closeShort();
+        audit(purchaseOrder, com.shvoy.purchaseorders.domain.PurchaseOrderAuditEventType.PO_CLOSED_SHORT,
+            "Closed short (" + reason + "); outstanding at closure: " + outstandingDetail);
+        purchaseOrderRepository.save(purchaseOrder);
     }
 
     /**
@@ -363,6 +427,7 @@ public class PurchaseOrderService {
             purchaseOrder.getBudgetCode(),
             purchaseOrder.isContractPending(),
             purchaseOrder.isCompliancePending(),
+            purchaseOrder.isOverDelivered(),
             purchaseOrder.getCreatedBy(),
             purchaseOrder.getOrderTotal(),
             purchaseOrder.getDeposit(),

@@ -107,6 +107,15 @@ public class PurchaseOrder extends TenantScoped {
     @Column(name = "compliance_pending", nullable = false)
     private boolean compliancePending;
 
+    /**
+     * Receipt-side flag (receipt rollup &amp; PO closure): cumulative received
+     * exceeds ordered on at least one SKU. Interim — surfaced and holds closure,
+     * pending the over-delivery rule (block/tolerance/accept). Derived per-SKU
+     * detail lives in the receipt-rollup view; this is the PO-level surface.
+     */
+    @Column(name = "over_delivered", nullable = false)
+    private boolean overDelivered;
+
     protected PurchaseOrder() {
     }
 
@@ -222,6 +231,39 @@ public class PurchaseOrder extends TenantScoped {
         }
     }
 
+    /**
+     * Receipt rollup &amp; PO closure — closure is an <em>observed fact</em>, not a
+     * command: the receipt side calls this when cumulative received = ordered per
+     * SKU exactly. Only a finalised PO closes; a `CLOSED_SHORT` (manual write-off)
+     * is never touched by the automatic evaluator.
+     */
+    public void closeOnReceipt() {
+        if (status == PurchaseOrderStatus.GENERATED || status == PurchaseOrderStatus.SENT) {
+            this.status = PurchaseOrderStatus.CLOSED;
+            this.updatedAt = Instant.now();
+        }
+    }
+
+    /** A GRN amendment that un-completes a closed PO reopens it (loud, audited) — silent wrong-closure is worse. */
+    public void reopenFromReceipt() {
+        if (status == PurchaseOrderStatus.CLOSED) {
+            this.status = PurchaseOrderStatus.SENT;
+            this.updatedAt = Instant.now();
+        }
+    }
+
+    /** The manual escape valve — a Finance/Admin write-off of the undelivered remainder. A distinct terminal fact. */
+    public void closeShort() {
+        this.status = PurchaseOrderStatus.CLOSED_SHORT;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Stamp/clear the over-delivered surface flag (receipt rollup). */
+    public void applyOverDelivered(boolean overDelivered) {
+        this.overDelivered = overDelivered;
+        this.updatedAt = Instant.now();
+    }
+
     public UUID getId() {
         return id;
     }
@@ -305,6 +347,10 @@ public class PurchaseOrder extends TenantScoped {
 
     public PurchaseOrderStatus getStatus() {
         return status;
+    }
+
+    public boolean isOverDelivered() {
+        return overDelivered;
     }
 
     public LocalDate getRequestedEtd() {
