@@ -162,6 +162,21 @@ public class ShipmentConsignment extends TenantScoped {
         this.updatedAt = Instant.now();
     }
 
+    /**
+     * Record (or revise) the supplier's confirmed ETD (Story 7.5). No anchor, no
+     * payment interaction — an estimated departure informs logistics, not due
+     * dates. Valid at any state before arrival is confirmed; the service enforces
+     * that (an ETD after the goods have landed is meaningless) and keeps the
+     * revision history. This guard is defense-in-depth.
+     */
+    public void setConfirmedEtd(LocalDate confirmedEtd) {
+        if (receiptStatus == ReceiptStatus.ARRIVED_CONFIRMED || receiptStatus == ReceiptStatus.ARRIVED_WITH_DISCREPANCY) {
+            throw new IllegalStateException("Arrival is already confirmed: " + receiptStatus);
+        }
+        this.confirmedEtd = confirmedEtd;
+        this.updatedAt = Instant.now();
+    }
+
     /** Set/clear the inspection-due flag (Story 7.4 revised) — the one interface the future scoring engine will also drive. */
     public void setInspectionDue(boolean inspectionDue) {
         this.inspectionDue = inspectionDue;

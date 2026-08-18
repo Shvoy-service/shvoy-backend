@@ -382,6 +382,18 @@ public class PurchaseOrderService {
         return new PurchaseOrderSummary(purchaseOrder.getId(), purchaseOrder.getPoNumber(), purchaseOrder.getSupplierId());
     }
 
+    /**
+     * The PO's requested ETD (Story 7.5's cross-module surface) — the fixed side
+     * of the ETD delta, against which {@code shipments} measures the supplier's
+     * confirmed ETD. Read-only; empty when the PO never had one set. Kept as a
+     * bare date (not a new view) — same minimal-contract reasoning as the other
+     * narrow reads.
+     */
+    @Transactional(readOnly = true)
+    public java.util.Optional<LocalDate> getRequestedEtd(UUID id) {
+        return java.util.Optional.ofNullable(findOwnPurchaseOrder(id).getRequestedEtd());
+    }
+
     /** Package-visible: reused by {@link PurchaseOrderLineService} so both services share one ownership check. */
     PurchaseOrder findOwnPurchaseOrder(UUID id) {
         PurchaseOrder purchaseOrder = purchaseOrderRepository.findById(id)

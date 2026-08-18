@@ -143,6 +143,7 @@ public class ShipmentDocumentService {
             consignment.getInspectionReportS3Key(),
             consignment.getReceiptStatus(),
             consignment.isReceiptEligible(),
+            consignment.getConfirmedEtd(),
             consignment.getCreatedAt(),
             consignment.getUpdatedAt());
         return new ShipmentResponse(
