@@ -1,0 +1,96 @@
+name: Deploy to dev
+
+# Manual push-button deploy of an already-pushed image to the dev ECS service.
+# You pick the tag (built by build-push.yml); this registers a new task-definition
+# revision with that image and rolls it out via ECS Express Mode's canary. Kept
+# manual on purpose: rolling out runs Flyway against real dev RDS, so deploy
+# timing stays a human decision.
+#
+# Requires the AWS OIDC deploy role (docs/aws/A8-cicd-deploy-role.md) and the
+# AWS_DEPLOY_ROLE_ARN repo variable. The Express-Mode commands mirror the A7
+# checklist verbatim; validate on the first real run.
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "ECR image tag to deploy (e.g. sha-abc1234)"
+        required: true
+        type: string
+
+# One dev deploy at a time.
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-west-2
+  ECR_REGISTRY: 038774852612.dkr.ecr.eu-west-2.amazonaws.com
+  ECR_REPOSITORY: shvoy-dev-backend
+  ECS_SERVICE: shvoy-dev-backend
+  TASK_FAMILY: shvoy-dev-backend
+  CONTAINER_NAME: Main
+  HEALTH_CHECK_PATH: /actuator/health
+
+jobs:
+  deploy:
+    name: Roll out to dev (Express Mode)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify the image exists in ECR
+        run: |
+          aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+            --image-ids imageTag="${{ inputs.image_tag }}" >/dev/null \
+            || { echo "::error::Image tag '${{ inputs.image_tag }}' not found in ECR — build it first."; exit 1; }
+
+      # Fetch the live task definition, swap the Main container's image to the
+      # chosen tag, strip the read-only fields, and register a new revision. This
+      # preserves everything else (runtimePlatform ARM64, secrets, env, roles).
+      - name: Register a new task-definition revision
+        id: taskdef
+        run: |
+          IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY:${{ inputs.image_tag }}"
+          CURRENT=$(aws ecs describe-task-definition --task-definition "$TASK_FAMILY" --query 'taskDefinition')
+          NEW=$(echo "$CURRENT" | jq \
+            --arg IMAGE "$IMAGE" --arg NAME "$CONTAINER_NAME" \
+            '.containerDefinitions |= map(if .name == $NAME then .image = $IMAGE else . end)
+             | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
+          ARN=$(aws ecs register-task-definition --cli-input-json "$NEW" \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "arn=$ARN" >> "$GITHUB_OUTPUT"
+          echo "Registered $ARN"
+
+      # Mirrors the A7 checklist. --infrastructure-role-arn is immutable after
+      # creation and MUST be omitted on update (see A7). Express Mode rolls out via
+      # a canary with a deployment circuit breaker, so a bad revision auto-rolls-back.
+      - name: Roll out via Express Mode
+        run: |
+          aws ecs update-express-gateway-service \
+            --service-name "$ECS_SERVICE" \
+            --task-definition-arn "${{ steps.taskdef.outputs.arn }}" \
+            --health-check-path "$HEALTH_CHECK_PATH"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Deploy to dev triggered"
+            echo "- Image tag: \`${{ inputs.image_tag }}\`"
+            echo "- Task definition: \`${{ steps.taskdef.outputs.arn }}\`"
+            echo ""
+            echo "Express Mode is rolling out via canary (circuit breaker + auto-rollback on failure)."
+            echo "Watch: \`aws ecs describe-service-deployments\` / the service in the console, and"
+            echo "\`curl https://sh-b631174fb2e94894bb26c4718352df04.ecs.eu-west-2.on.aws/actuator/health\`."
+            echo ""
+            echo "> First real boot of a new revision runs any pending Flyway migrations against dev RDS —"
+            echo "> check the \`/ecs/shvoy-dev-backend\` CloudWatch log group if anything looks off."
+          } >> "$GITHUB_STEP_SUMMARY"
