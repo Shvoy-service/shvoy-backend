@@ -1,0 +1,59 @@
+name: CI
+
+# Runs the full test suite on every PR into main, and on pushes to main so the
+# default branch stays green. The Surefire suite runs against an in-memory H2
+# database (MODE=PostgreSQL) — no external services (see
+# src/main/resources/application-test.yml). The one Failsafe IT
+# (S3ConnectivityIT) spins up LocalStack via Testcontainers, which needs Docker;
+# GitHub's ubuntu-latest runners provide it by default, so `verify` runs it too.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# A newer commit on the same PR/branch supersedes an in-flight run — don't burn
+# minutes finishing a run whose result no longer matters.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build & test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      # No toolchains.xml in the repo, so the JDK on PATH is what mvnw compiles
+      # and runs with — it must be 25 (pom.xml sets <java.version>25</java.version>).
+      # `cache: maven` keys the local ~/.m2 on the pom so dependency downloads are
+      # reused across runs.
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      # `verify` is a superset of `test`: it runs the full surefire suite and also
+      # packages the jar, so a green run proves both that every test passes and
+      # that the application still assembles. -B batch mode + -ntp quiet the logs.
+      - name: Build and run the test suite
+        run: ./mvnw -B -ntp verify
+
+      # Surface the surefire reports as an artifact so a red run is diagnosable
+      # from the Actions UI without re-running locally. Kept short-lived.
+      - name: Upload test reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports/
+          retention-days: 7
+          if-no-files-found: ignore
