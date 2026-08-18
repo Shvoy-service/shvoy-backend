@@ -957,11 +957,14 @@ Response — pin this shape (the frontend types against it, same discipline as `
     { "supplierId": "…", "supplierName": "Acme Imports", "status": "EXPIRED",
       "expiredCount": 2, "neverPricedCount": 1, "expiringCount": 0, "earliestExpiry": null }
   ],
-  "alerts": []
+  "alerts": [
+    { "code": "APPROVER_POOL_UNSATISFIABLE", "severity": "WARNING",
+      "message": "…", "link": "/settings/approvers" }
+  ]
 }
 ```
 
-`priceWarnings` (9.2, below) is a capped digest of the supplier price-file rollup — added additively, exactly as the `alerts` slot anticipated; the shape grew compatibly. `alerts` stays `[]` (9.3's slot).
+`priceWarnings` (9.2) and `alerts` (9.3) both filled slots 9.1 shipped empty, additively — the shape grew compatibly.
 
 - **Composition, never recomputation.** The three stats come from the existing operations — `overduePayments`/`dueWithinFiveDays` from 6.3's `getStats()`, `openDiscrepancies` from 6.6's open-case `stats()`; the rows from 6.3's default queue view. The `dashboard` module holds **no** overdue / due-window / open-case logic of its own — a second calculation is exactly the drift this reuse prevents (if the dashboard's overdue count ever disagreed with the payments screen, that's the bug). Delivered through a narrow `payments`-owned `@NamedInterface("payment-dashboard")` facade (`PaymentDashboardService`) that *delegates* to those operations; the dashboard composes and shapes.
 - **Rows are a digest, capped at 10**, soonest-due first, undated (awaiting-anchor) grouped last, unpaid only, each with the derived `overdue` flag — the exact rows 6.3's queue produces, narrowed. The full, paginated queue is one click away in the Payments view; **the dashboard doesn't paginate.** The boundaries inherit as-pinned from 6.3 (overdue = strictly past due; due-within-5 inclusive of day 5).
@@ -985,6 +988,26 @@ The proactive end of the expired-price control — Screen 2's "expired price fil
 - **The warning window — 14 days, inclusive** (`WARNING_WINDOW_DAYS`, MVP constant). A current price warns when `validTo ≤ today + 14`. Boundaries, stated once: a price expiring **today** is still **in-date** today (so `EXPIRING_SOON`, not `EXPIRED`); `validTo = today+14` warns, `today+15` does not; expiry means *no valid price today*. **Open-ended prices (`validTo` null) are永 in-date and never warn.** A candidate per-account setting later — **not built now** (constant first, config when someone asks — the tolerance lesson).
 - **`EXPIRED` dominates the rollup** — a supplier with both an expired and an expiring SKU shows `EXPIRED` (and its `earliestExpiry` is null — moot once already expired). Counts (`expiredCount`, `neverPricedCount`, `expiringCount`, `earliestExpiry`) ride the rollup; the per-SKU cases are the drill-down.
 - **Dashboard integration.** 9.1's response carries `priceWarnings` — the same rollup, **capped at 10, expired-first** (empty when all's well). Ordering lives in the operation (single source); the dashboard only caps. **No new stat tile** — price warnings are a list section, not a fourth tile the wireframe didn't ask for. All derived at read time: a price uploaded *now* clears the warning on the next read — no job, no cache (tested end to end). Anti-drift asserted (the dashboard section equals the standalone operation), the same tripwire as 9.1.
+
+### System alert banner (Story 9.3)
+
+Screen 1's banner slot — the `alerts` array 9.1 shipped empty, populated from **real current-state conditions that already exist**, with deliberately **no alerting framework**: no alert table, no lifecycle, no acknowledge/dismiss, no scheduler, no per-user preferences. Each alert is derived on every dashboard read and vanishes the moment its condition clears. Composed in the `dashboard` module from operations other modules own. The review question is "what did it *add*?" — the answer is *two read-time queries and a response section*.
+
+Entry shape (pinned; the frontend maps display copy and routing from `code`):
+```json
+{ "code": "APPROVER_POOL_UNSATISFIABLE", "severity": "WARNING", "message": "…", "link": "/settings/approvers" }
+```
+- `code` — stable machine code (the error-code discipline, for alerts). `severity` — `WARNING` / `INFO`, two levels not five (nothing here is a paging emergency). `message` — a human fallback, not the contract. `link` — a frontend route hint (a relative path the frontend owns).
+- Visible to **all roles** (content identical; the link is just less useful to non-admins). Ordered by severity then code; realistically 0–2 entries; empty is the healthy norm. Tenant-scoped.
+
+The two MVP conditions (each read-time, actionable, already-known):
+
+| `code` | Fires when | Severity / link |
+|---|---|---|
+| `APPROVER_POOL_UNSATISFIABLE` | The approver pool **has members but fewer than the required sign-off count** — the 5.5/5.6 stranded case (a member deactivated below N), so price-increase PIs can't be approved. **A company that has never added an approver is *not* nagged** — that's an unconfigured pool (onboarding's concern), not a stranded one, and every fresh company would otherwise sit permanently amber. | `WARNING` / `/settings/approvers` |
+| `SUPPLIER_REVALIDATION_REQUIRED` | One or more suppliers **reverted to `PENDING`** (the bank-details rule) while carrying a **live order** (a `GENERATED`/`SENT` PO). Makes the audit-loud revert loud on the landing page too. | `WARNING` / `/suppliers?validationStatus=PENDING` |
+
+- **Deliberately excluded:** the blocked-payments count (the stat tile already says it — recorded as skipped, not discovered); price expiry (9.2's own section — not said twice); ETD slips (no threshold, Phase 2); anything needing new state, thresholds, acknowledgement, or per-user targeting. The banner reads current state; it remembers nothing. New conditions later are one read-time evaluator each, when asked.
 
 ---
 

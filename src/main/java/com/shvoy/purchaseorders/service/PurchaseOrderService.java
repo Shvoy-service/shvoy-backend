@@ -394,6 +394,21 @@ public class PurchaseOrderService {
         return java.util.Optional.ofNullable(findOwnPurchaseOrder(id).getRequestedEtd());
     }
 
+    /**
+     * The set of supplier ids with at least one <em>live</em> purchase order —
+     * {@code GENERATED} or {@code SENT} (Story 9.3's alert input). A supplier that
+     * reverted to {@code PENDING} but has a live order is the operationally
+     * meaningful re-validation case the dashboard banner surfaces. Read-only,
+     * tenant-scoped (findAll is tenant-constrained).
+     */
+    @Transactional(readOnly = true)
+    public java.util.Set<UUID> supplierIdsWithOpenPurchaseOrders() {
+        return purchaseOrderRepository.findAll().stream()
+            .filter(po -> po.getStatus() == PurchaseOrderStatus.GENERATED || po.getStatus() == PurchaseOrderStatus.SENT)
+            .map(PurchaseOrder::getSupplierId)
+            .collect(java.util.stream.Collectors.toSet());
+    }
+
     /** Package-visible: reused by {@link PurchaseOrderLineService} so both services share one ownership check. */
     PurchaseOrder findOwnPurchaseOrder(UUID id) {
         PurchaseOrder purchaseOrder = purchaseOrderRepository.findById(id)

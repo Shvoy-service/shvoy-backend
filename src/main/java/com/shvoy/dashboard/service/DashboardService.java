@@ -6,8 +6,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.shvoy.dashboard.dto.DashboardResponse;
-import com.shvoy.payments.service.PaymentDashboardService;
 import com.shvoy.suppliers.dto.SupplierPriceWarning;
+import com.shvoy.payments.service.PaymentDashboardService;
 import com.shvoy.suppliers.service.PriceWarningService;
 
 /**
@@ -32,10 +32,13 @@ public class DashboardService {
 
     private final PaymentDashboardService paymentDashboardService;
     private final PriceWarningService priceWarningService;
+    private final AlertService alertService;
 
-    DashboardService(PaymentDashboardService paymentDashboardService, PriceWarningService priceWarningService) {
+    DashboardService(PaymentDashboardService paymentDashboardService, PriceWarningService priceWarningService,
+            AlertService alertService) {
         this.paymentDashboardService = paymentDashboardService;
         this.priceWarningService = priceWarningService;
+        this.alertService = alertService;
     }
 
     @Transactional(readOnly = true)
@@ -48,6 +51,6 @@ public class DashboardService {
             paymentDashboardService.stats(),
             paymentDashboardService.digest(ROW_CAP),
             priceWarnings,
-            List.of()); // 9.3's slot — empty until then
+            alertService.alerts());
     }
 }
