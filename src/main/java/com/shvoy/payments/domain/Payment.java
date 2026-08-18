@@ -14,6 +14,8 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import com.shvoy.ConflictException;
+import com.shvoy.ErrorCode;
 import com.shvoy.Money;
 import com.shvoy.TenantScoped;
 import com.shvoy.suppliers.domain.AnchorEvent;
@@ -90,6 +92,14 @@ public class Payment extends TenantScoped {
     @Column(name = "match_overridden", nullable = false)
     private boolean matchOverridden;
 
+    /** The date Finance recorded the payment as made (Story 6.8) — defaults to the action date, overridable. */
+    @Column(name = "paid_date")
+    private LocalDate paidDate;
+
+    /** A free-text payment reference (bank ref / batch id), captured at pay time (Story 6.8). Nullable. */
+    @Column(name = "payment_reference", length = 200)
+    private String paymentReference;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -162,18 +172,34 @@ public class Payment extends TenantScoped {
             || status == PaymentStatus.READY_TO_PAY;
     }
 
+    /**
+     * The one place a payment's status changes (Story 6.8, the 5.7 pattern) —
+     * guarded by {@link PaymentStatus#canTransitionTo}. An illegal move throws
+     * {@code INVALID_STATUS_TRANSITION} rather than corrupting state, so no code
+     * path — match, resolution, or a human action — can, say, pay a {@code
+     * PENDING} payment or move a {@code PAID} one. Defense-in-depth: the service
+     * preconditions already reject the reachable illegal cases with more specific
+     * codes; this ensures nothing slips through.
+     */
+    private void transitionTo(PaymentStatus target) {
+        if (!status.canTransitionTo(target)) {
+            throw new ConflictException(ErrorCode.INVALID_STATUS_TRANSITION,
+                "Illegal payment status transition: " + status + " → " + target);
+        }
+        this.status = target;
+        this.updatedAt = Instant.now();
+    }
+
     /** The match passed → READY_TO_PAY, clearing any prior failure detail (Story 6.5). Guarded by {@link #isMatchMutable()}. */
     public void markMatchPassed() {
-        this.status = PaymentStatus.READY_TO_PAY;
+        transitionTo(PaymentStatus.READY_TO_PAY);
         this.matchDetail = null;
-        this.updatedAt = Instant.now();
     }
 
     /** The match failed → BLOCKED, recording which leg disagreed (Story 6.5). Guarded by {@link #isMatchMutable()}. */
     public void markMatchBlocked(String detail) {
-        this.status = PaymentStatus.BLOCKED;
+        transitionTo(PaymentStatus.BLOCKED);
         this.matchDetail = detail;
-        this.updatedAt = Instant.now();
     }
 
     /**
@@ -183,15 +209,13 @@ public class Payment extends TenantScoped {
      * with the awaiting reason in the detail.
      */
     public void markAwaiting(String detail) {
-        this.status = PaymentStatus.PENDING;
+        transitionTo(PaymentStatus.PENDING);
         this.matchDetail = detail;
-        this.updatedAt = Instant.now();
     }
 
     /** A deposit made payable without the match, per the per-type gate policy (Story 6.5). */
     public void markPayableWithoutMatch() {
-        this.status = PaymentStatus.READY_TO_PAY;
-        this.updatedAt = Instant.now();
+        transitionTo(PaymentStatus.READY_TO_PAY);
     }
 
     /**
@@ -201,13 +225,48 @@ public class Payment extends TenantScoped {
      * the discrepancy case.
      */
     public void overrideMatch() {
-        this.status = PaymentStatus.READY_TO_PAY;
+        transitionTo(PaymentStatus.READY_TO_PAY);
         this.matchOverridden = true;
-        this.updatedAt = Instant.now();
+    }
+
+    /**
+     * The Pay decision (Story 6.8) — {@code READY_TO_PAY → PAID}, terminal. SHVOY
+     * records that the payment is being/has been paid; it never moves money. The
+     * paid date defaults to the action date at the service but is overridable
+     * (Finance often records a payment a day after execution); the reference is
+     * an optional bank ref / batch id. No un-pay exists — a mistaken record is a
+     * ledger conversation (6.7), not a status flip.
+     */
+    public void pay(LocalDate paidDate, String paymentReference) {
+        transitionTo(PaymentStatus.PAID);
+        this.paidDate = paidDate;
+        this.paymentReference = paymentReference;
+    }
+
+    /**
+     * Finance's brake on a payment the system considers clean (Story 6.8) —
+     * {@code READY_TO_PAY → ON_HOLD}. The reason (mandatory, audited at the
+     * service) records why a human overrode a passing verdict.
+     */
+    public void hold() {
+        transitionTo(PaymentStatus.ON_HOLD);
+    }
+
+    /** Release a hold (Story 6.8) — {@code ON_HOLD → READY_TO_PAY}. The caller then re-checks the current match verdict. */
+    public void releaseHold() {
+        transitionTo(PaymentStatus.READY_TO_PAY);
     }
 
     public boolean isMatchOverridden() {
         return matchOverridden;
+    }
+
+    public LocalDate getPaidDate() {
+        return paidDate;
+    }
+
+    public String getPaymentReference() {
+        return paymentReference;
     }
 
     public UUID getId() {

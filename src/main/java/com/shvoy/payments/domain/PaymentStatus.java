@@ -20,5 +20,41 @@ public enum PaymentStatus {
     BLOCKED,
     READY_TO_PAY,
     PAID,
-    ON_HOLD
+    ON_HOLD;
+
+    /**
+     * The full payment lifecycle, in one place (Story 6.8) — the 5.7 pattern.
+     * Every legitimate move is here; anything else ({@code PENDING → PAID},
+     * {@code BLOCKED → PAID}, {@code ON_HOLD → PAID}, {@code PAID → anything})
+     * is rejected with {@code INVALID_STATUS_TRANSITION} rather than corrupting
+     * state. The narrow "which buttons exist when" map the frontend renders off
+     * status is a subset of this: the human actions (pay/hold/release) also
+     * enforce their own preconditions with distinct codes at the service layer,
+     * so this guard is defense-in-depth. The extra system moves permitted here
+     * ({@code READY_TO_PAY → PENDING/BLOCKED}, {@code BLOCKED → PENDING}) are the
+     * match re-evaluating as inputs change (a leg vanishing → awaiting; a leg
+     * disagreeing → blocked) and {@code ON_HOLD → BLOCKED} is a re-match failing
+     * while the payment was held. A same-state move is an idempotent no-op (so a
+     * deterministic re-evaluation can't trip the guard).
+     *
+     * <ul>
+     *   <li>{@code PENDING → READY_TO_PAY | BLOCKED} (match / deposit gate)</li>
+     *   <li>{@code BLOCKED → READY_TO_PAY} (6.6 resolution/override) {@code | PENDING} (a leg vanished)</li>
+     *   <li>{@code READY_TO_PAY → PAID | ON_HOLD} (6.8) {@code | BLOCKED | PENDING} (match re-eval)</li>
+     *   <li>{@code ON_HOLD → READY_TO_PAY} (release) {@code | BLOCKED} (re-match failed while held) {@code | PENDING} (release re-check, a leg vanished)</li>
+     *   <li>{@code PAID} — terminal.</li>
+     * </ul>
+     */
+    public boolean canTransitionTo(PaymentStatus target) {
+        if (this == target) {
+            return true;
+        }
+        return switch (this) {
+            case PENDING -> target == READY_TO_PAY || target == BLOCKED;
+            case BLOCKED -> target == READY_TO_PAY || target == PENDING;
+            case READY_TO_PAY -> target == PAID || target == ON_HOLD || target == BLOCKED || target == PENDING;
+            case ON_HOLD -> target == READY_TO_PAY || target == BLOCKED || target == PENDING;
+            case PAID -> false;
+        };
+    }
 }

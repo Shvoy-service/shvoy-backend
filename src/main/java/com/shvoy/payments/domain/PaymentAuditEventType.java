@@ -20,5 +20,11 @@ public enum PaymentAuditEventType {
     /** The three-way match failed — the balance was BLOCKED; the detail records which leg (Story 6.5). */
     MATCH_BLOCKED,
     /** A deposit was made payable without the match, per the per-type gate policy (Story 6.5). */
-    DEPOSIT_PAYABLE
+    DEPOSIT_PAYABLE,
+    /** Finance recorded the payment as paid — READY_TO_PAY → PAID, terminal (Story 6.8). */
+    PAID,
+    /** Finance held a clean payment — READY_TO_PAY → ON_HOLD, with a mandatory reason (Story 6.8). */
+    HELD,
+    /** A hold was released — ON_HOLD → READY_TO_PAY, then re-checked against the current verdict (Story 6.8). */
+    HOLD_RELEASED
 }

@@ -127,6 +127,9 @@ Every error response across the API — validation, not-found, conflict, forbidd
 | `PO_NOT_READY_FOR_PI` | 409 | Logging a PI blocked: the PO is still `DRAFT` — see PI reconciliation below |
 | `PO_NOT_READY_FOR_INVOICE` | 409 | Logging an invoice blocked: the PO is still `DRAFT` — see Payments & three-way match below |
 | `INVOICE_COVERAGE_INCOHERENT` | 409 | An invoice's declared `covers_type` references don't hold at entry (deposit against a no-deposit PO, an unreceipted shipment consignment, a SKU not on the PO) — see Invoice logging below |
+| `PAYMENT_NOT_PAYABLE` | 409 | Pay attempted on a payment that isn't `READY_TO_PAY` — the message names the actual status (an `ON_HOLD` one must be released first; a `BLOCKED` one is resolved via its discrepancy case) — see Payment release below |
+| `PAYMENT_NOT_HOLDABLE` | 409 | Hold attempted on a payment that isn't `READY_TO_PAY` — see Payment release below |
+| `PAYMENT_NOT_ON_HOLD` | 409 | Release attempted on a payment that isn't `ON_HOLD` — see Payment release below |
 | `CREDIT_NOT_OPEN` | 409 | A credit ledger operation (apply / cancel) requires an `OPEN` entry, but it's already `APPLIED`/`CANCELLED` — see Payments & three-way match below |
 | `INELIGIBLE_APPROVER` | 409 | Can't add this user to the approver pool: they're not an active `APPROVER` in the company — see Approver pool below |
 | `APPROVER_COUNT_EXCEEDS_POOL` | 409 | The required sign-off count would exceed the active approver-pool size (set-count, or a removal that would drop below it) — see Approver pool below |
@@ -776,6 +779,28 @@ The human half of the match control: when 6.5 blocks a payment, a **discrepancy 
 - **The four resolution paths.** (a) **Correct the data** — the fix happens in the owning story (supersede the invoice 6.4, amend the GRN 7.4), which re-triggers the match; a passing re-run **auto-resolves** the case (`CORRECTED`). (b) **Agree a credit** — log a credit in the ledger from the case (6.7), linking case → entry; the case resolves (`CREDITED`) when the match passes once a claiming/reduced invoice aligns. (c) **Override** — accept the difference as-is: **force-pass** the payment to `READY_TO_PAY` with a **required reason**, immutably audited, and mark it `match_overridden` (V56) so a later re-run never re-blocks it. **`FINANCE`/`ADMIN` only** — Purchasing resolves, but overriding the payment *control* is a Finance-grade decision (the 5.5 segregation instinct); **flagged** for the POs, one `@PreAuthorize` to relax. (d) **Dispute** — contest the invoice: the case is `DISPUTED` and the payment stays `BLOCKED` (the seam a future NCR/dispute-letter flow hangs from; the state is modelled, not the machinery).
 - **Dashboard stat — pinned.** "Open discrepancies" = **open discrepancy cases** (OPEN + DISPUTED), exposed at `GET /api/discrepancies/stats`. This corrects 6.7's placeholder: the credit ledger's open-entry count (6.7's `/stats`) is a separate **"open credits"** ledger view, **not** the Screen-1 "Open discrepancies" stat.
 - **A latent transaction bug fixed in passing:** the match is driven from `@TransactionalEventListener(AFTER_COMMIT)`, and a `REQUIRED` write inside an after-commit callback silently fails to commit (the triggering tx is already completing). Only the invoice trigger (published *outside* a tx → fallback path) was actually persisting; the credit/PI-confirm/PO-generation triggers were no-ops in production. `ThreeWayMatchService#evaluate` and `GrnProjectionService#project` are now `REQUIRES_NEW` (a single nested level, well within the pool).
+
+### Payment release — Pay / Hold & the lifecycle (Story 6.8)
+
+The human decision at the end of the pipeline: Finance marks a `READY_TO_PAY` payment as paid, or holds it. With this, the full lifecycle runs end to end — PO → PI → GRN → match → release. In `payments`. **SHVOY records the payment decision; it does not move money** — "Pay" is a status fact, not a bank transfer.
+
+| Method | Path | Role | Notes |
+|---|---|---|---|
+| `POST` | `/api/payments/{id}/pay` | `FINANCE`/`ADMIN` | `READY_TO_PAY → PAID`, terminal. Body optional: `{ paidDate?, paymentReference? }` — `paidDate` defaults to today, overridable (Finance often records a day late); `paymentReference` is a free-text bank ref / batch id. `PAYMENT_NOT_PAYABLE`/409 from any other status (message names it, and points `ON_HOLD` at release-first, `BLOCKED` at the discrepancy case). |
+| `POST` | `/api/payments/{id}/hold` | `FINANCE`/`ADMIN` | `READY_TO_PAY → ON_HOLD`, **mandatory reason** (`VALIDATION_ERROR` without). `PAYMENT_NOT_HOLDABLE`/409 from elsewhere. |
+| `POST` | `/api/payments/{id}/release-hold` | `FINANCE`/`ADMIN` | `ON_HOLD → READY_TO_PAY`, reason optional, then **re-checks the current match verdict** (may immediately re-block). `PAYMENT_NOT_ON_HOLD`/409 from elsewhere. |
+
+- **`FINANCE`/`ADMIN` only — `PURCHASING` cannot.** The segregation that runs through 5.5 and 6.6: the role that creates obligations doesn't release them.
+- **`PAID` is terminal — no un-pay.** A mistaken payment record is a ledger conversation (6.7's credit/recovery lane), not a status flip; its deliberate absence is a feature. Pay fires a `PaymentPaidEvent` (the running position's %-paid is derived so it moves immediately; the event is for the future statement view). Optional reference + overridable paid date are audited (`PAID`).
+- **Hold is Finance's brake on a payment the *system* considers clean** — cash-flow timing, a supplier conversation in flight. The reason is mandatory *because* every check passed; overriding "ready" deserves a recorded why (`HELD`). Release audits `HOLD_RELEASED` and lands on the **current** verdict, not the pre-hold state.
+- **Re-match while held.** If inputs change while a payment is `ON_HOLD` (invoice superseded, GRN amended) and the match now fails, it goes `ON_HOLD → BLOCKED` — the system's verdict re-asserts; the hold is moot against a failed match (audited with both facts). A *passing* or *incomplete* re-match leaves the hold standing (a human brake isn't lifted by the system).
+- **No Pay/Hold on `BLOCKED`.** Its only exits are 6.6's resolution paths (fix / credit / override / dispute). This story adds nothing there.
+- **Rolling suppliers never present a Pay button.** Their match is record-only (6.5's `STATEMENT_RECORDED` policy — no per-PO payment transition), so a rolling balance never reaches `READY_TO_PAY`; settling the *cycle* is the statement story's action, not per-payment Pay here.
+- **The lifecycle, enforced in one place** (`PaymentStatus.canTransitionTo`, the 5.7 pattern — every status change routes through `Payment.transitionTo`, illegal moves throw `INVALID_STATUS_TRANSITION`; the human actions add stricter per-action codes on top). The frontend renders its buttons off status, so this is the contract for which buttons exist when:
+
+  `PENDING → READY_TO_PAY | BLOCKED` (match) · `BLOCKED → READY_TO_PAY` (6.6 resolution/override) · `READY_TO_PAY → PAID | ON_HOLD` (6.8) · `ON_HOLD → READY_TO_PAY` (release) · `ON_HOLD → BLOCKED` (re-match while held) · `PAID` terminal.
+
+  (The map also permits the match's re-evaluation bounces — `READY_TO_PAY → PENDING/BLOCKED`, `BLOCKED → PENDING` — as a leg appears or vanishes; those aren't user actions.) Anything else — `PENDING → PAID`, `BLOCKED → PAID`, `PAID → anything` — is rejected.
 
 ---
 
