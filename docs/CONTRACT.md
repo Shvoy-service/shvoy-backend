@@ -933,6 +933,37 @@ Record the supplier's **confirmed ETD** against the PO's **requested ETD** (4.4,
 
 ---
 
+## Dashboard (Feature 9)
+
+**Owner:** Story 9.1 (the aggregation endpoint). The `dashboard` module — empty since the Feature 1 scaffold — exists for this: it serves Screen 1 in one shape, composed entirely from operations that already exist. An **assembly** — its value is the composition and the contract, not new computation.
+
+### Dashboard aggregation endpoint (Story 9.1)
+
+| Method | Path | Role | Notes |
+|---|---|---|---|
+| `GET` | `/api/dashboard` | Any authenticated (`READ_ONLY` included) | Screen 1 in one round-trip: the three stat tiles, the capped payment digest, and the (empty) alerts slot. |
+
+Response — pin this shape (the frontend types against it, same discipline as `/me`):
+
+```json
+{
+  "stats": { "overduePayments": 3, "dueWithinFiveDays": 7, "openDiscrepancies": 2 },
+  "payments": [
+    { "poReference": "PO-0001", "supplierName": "Acme Imports", "type": "DEPOSIT",
+      "amount": { "amount": "12500.00", "currency": "USD" }, "dueDate": "2026-09-02",
+      "status": "PENDING", "overdue": true }
+  ],
+  "alerts": []
+}
+```
+
+- **Composition, never recomputation.** The three stats come from the existing operations — `overduePayments`/`dueWithinFiveDays` from 6.3's `getStats()`, `openDiscrepancies` from 6.6's open-case `stats()`; the rows from 6.3's default queue view. The `dashboard` module holds **no** overdue / due-window / open-case logic of its own — a second calculation is exactly the drift this reuse prevents (if the dashboard's overdue count ever disagreed with the payments screen, that's the bug). Delivered through a narrow `payments`-owned `@NamedInterface("payment-dashboard")` facade (`PaymentDashboardService`) that *delegates* to those operations; the dashboard composes and shapes.
+- **Rows are a digest, capped at 10**, soonest-due first, undated (awaiting-anchor) grouped last, unpaid only, each with the derived `overdue` flag — the exact rows 6.3's queue produces, narrowed. The full, paginated queue is one click away in the Payments view; **the dashboard doesn't paginate.** The boundaries inherit as-pinned from 6.3 (overdue = strictly past due; due-within-5 inclusive of day 5).
+- **`alerts` ships as an empty array from day one** — it's 9.3's banner slot. Shipping the field now makes 9.3 additive for the frontend, not a contract change. Price-expiry warnings (9.2) join as a further field when that story defines them, not speculatively.
+- **No caching** — the most-hit endpoint fans out to a few queries, which is fine at pilot scale; a cached overdue count that survives a Pay action is a worse bug than a slow query. The row join already batches PO + supplier lookups (no N+1). Tenant-scoped through the reused operations; an integration test asserts the whole composed response contains nothing of another tenant's.
+
+---
+
 ## Dates and timestamps
 
 **Owner:** Cleanup Story 5 (date field mapping & container-fill deadline timezone). Field-level mapping is now **settled** — Story 3.4 gave the rule its first concrete case (SKU price validity dates), so this is no longer a rule with nothing to point at. Only the container-fill deadline timezone remains open, parked until Feature 8.
