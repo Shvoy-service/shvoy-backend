@@ -249,6 +249,37 @@ public class ShipmentConsignment extends TenantScoped {
         this.updatedAt = Instant.now();
     }
 
+    /**
+     * Confirm physical arrival (Story 7.6) — {@code PROVISIONALLY_RECEIPTED →
+     * ARRIVED_CONFIRMED} (counts matched the GRN) or {@code
+     * ARRIVED_WITH_DISCREPANCY} (they didn't). Records the arrival date (the
+     * {@code ARRIVAL} anchor's date). The service enforces the from-state and
+     * runs the vs-GRN comparison; this guard is defense-in-depth. Arrival never
+     * unwinds settled state — the discrepancy, if any, lives in the credit lane,
+     * not on the payment.
+     */
+    public void confirmArrival(LocalDate arrivalDate, boolean matchedGrn) {
+        if (receiptStatus != ReceiptStatus.PROVISIONALLY_RECEIPTED) {
+            throw new IllegalStateException("Consignment is not PROVISIONALLY_RECEIPTED: " + receiptStatus);
+        }
+        this.arrivalDate = arrivalDate;
+        this.receiptStatus = matchedGrn ? ReceiptStatus.ARRIVED_CONFIRMED : ReceiptStatus.ARRIVED_WITH_DISCREPANCY;
+        this.updatedAt = Instant.now();
+    }
+
+    /**
+     * Correct a confirmed arrival's date (Story 7.6) — only the date, never the
+     * counts or the status (a count correction is a credit-lane matter). Valid
+     * only once arrival is confirmed; re-publishes the {@code ARRIVAL} anchor.
+     */
+    public void correctArrivalDate(LocalDate arrivalDate) {
+        if (receiptStatus != ReceiptStatus.ARRIVED_CONFIRMED && receiptStatus != ReceiptStatus.ARRIVED_WITH_DISCREPANCY) {
+            throw new IllegalStateException("Arrival is not confirmed: " + receiptStatus);
+        }
+        this.arrivalDate = arrivalDate;
+        this.updatedAt = Instant.now();
+    }
+
     public UUID getId() {
         return id;
     }
