@@ -19,15 +19,15 @@ import com.shvoy.suppliers.dto.SupplierPriceWarning;
  *
  * <p>{@code priceWarnings} (9.2) is the suppliers whose price files are expired or
  * expiring soon — a capped digest of the same rollup Screen 2 serves uncapped;
- * empty when all's well. Added additively, exactly as the {@code alerts} slot
- * anticipated. {@code alerts} ships as an <strong>empty array from day one</strong>
- * — 9.3's banner slot; shipping the field now makes 9.3 additive, not a contract
- * change.
+ * empty when all's well. {@code alerts} (9.3) is the system-alert banner — the
+ * current-state conditions worth flagging (approver pool unsatisfiable, suppliers
+ * needing re-validation), derived read-time and empty when healthy. Both filled
+ * the slots 9.1 shipped empty, additively — the shape grew compatibly.
  */
 public record DashboardResponse(
     DashboardStatsView stats,
     List<DashboardPaymentRowView> payments,
     List<SupplierPriceWarning> priceWarnings,
-    List<Object> alerts
+    List<DashboardAlert> alerts
 ) {
 }

@@ -73,6 +73,22 @@ public class SupplierService {
             .toList();
     }
 
+    /**
+     * Active suppliers currently awaiting (re-)validation (Story 9.3's alert
+     * input) — the {@code PENDING} ones, as {@link SupplierSummary} (id + name).
+     * The dashboard intersects these with suppliers that have live orders to
+     * decide the {@code SUPPLIER_REVALIDATION_REQUIRED} banner. Read-only.
+     */
+    @Transactional(readOnly = true)
+    public List<SupplierSummary> pendingSuppliers() {
+        return supplierRepository.findAll().stream()
+            .filter(s -> s.getStatus() == SupplierStatus.ACTIVE)
+            .filter(s -> s.getValidationStatus() == com.shvoy.suppliers.domain.SupplierValidationStatus.PENDING)
+            .sorted(Comparator.comparing(Supplier::getName, String.CASE_INSENSITIVE_ORDER))
+            .map(s -> new SupplierSummary(s.getId(), s.getName(), s.getCountry(), s.getContactEmail()))
+            .toList();
+    }
+
     @Transactional(readOnly = true)
     public SupplierResponse get(UUID id) {
         return toResponse(findOwnSupplier(id));

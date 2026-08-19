@@ -10,6 +10,7 @@ import java.util.List;
  * the gate can be met. {@code usingDefaultRequiredCount} flags that no count
  * has been configured and the built-in default is in effect.
  */
+@org.springframework.modulith.NamedInterface("approver-pool")
 public record ApproverPoolResponse(
     int requiredSignOffCount,
     boolean usingDefaultRequiredCount,

@@ -230,7 +230,7 @@ class DashboardControllerTest {
         Timestamp now = Timestamp.from(Instant.now());
         jdbcTemplate.update("INSERT INTO companies (id, name, created_at) VALUES (?, ?, ?)", companyId, "Co", now);
         UUID supplierId = UUID.randomUUID();
-        jdbcTemplate.update("INSERT INTO suppliers (id, name, status, created_at, company_id) VALUES (?, ?, 'ACTIVE', ?, ?)",
+        jdbcTemplate.update("INSERT INTO suppliers (id, name, status, validation_status, created_at, company_id) VALUES (?, ?, 'ACTIVE', 'VALIDATED', ?, ?)",
             supplierId, supplierName, now, companyId);
         UUID userId = UUID.randomUUID();
         jdbcTemplate.update(
