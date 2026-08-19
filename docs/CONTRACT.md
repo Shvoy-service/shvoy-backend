@@ -231,6 +231,106 @@ An isolated, low-cost-to-reverse choice confined to `PaymentTerms#split`.
 - Validity dates (`valid_from`/`valid_to`) are `LocalDate`/`DATE` — see Dates and timestamps below.
 - `Sku` and `SkuPrice` both implement `TenantScoped`; a test proves Company A can't see Company B's SKUs or prices (`SkuTenantIsolationTest`, `SkuPriceTenantIsolationTest`).
 
+### Supplier SKU read — `GET /api/suppliers/{supplierId}/skus`
+
+**Owner:** Story — supplier SKU read endpoint. The supplier screen's **one-call read**: a supplier's SKUs, each with carton size, its current price (with a derived in-date flag), and that price's discount tiers **inline** — so the frontend types against one shape and doesn't fan out to price-resolution and the tiers endpoint per SKU. **Read-only; this is the contract the frontend types against** (`SupplierSkuViewSerializationTest` fails CI on any field rename/reorder/type change, so drift can't reach the frontend build silently).
+
+- **Auth:** any authenticated company user — no `ADMIN`/`PURCHASING` gate (same read posture as price-resolution; `READ_ONLY` sees it). **Tenant-scoped:** a cross-tenant or unknown supplier is `404`/`NOT_FOUND`.
+- **Returns `200` with a JSON array of `SupplierSkuView`**, one per SKU. Behaviour the frontend can rely on:
+  - **Active SKUs only** — soft-deleted (`INACTIVE`) SKUs are excluded.
+  - **Ordered by SKU `code`, ascending** — pinned, so the frontend never has to sort against an undefined order.
+  - **History is not included** and there is no `?includeHistory`-style param on this endpoint. A SKU's full price timeline stays heavy and off this read; if a history read is ever wanted it's a separate endpoint, not a mode of this one.
+
+Each array element:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `sku` | `SkuResponse` | The SKU's own fields, reused verbatim: `id`, `supplierId`, `code`, `description` (nullable), `status`, `cartonSize` (nullable `Integer` — null = sold loose, no carton constraint), `createdAt`, `updatedAt` (nullable). |
+| `currentPrice` | `CurrentPriceView` \| `null` | The **current** price (below), or **`null` when the SKU has never been priced** — a legitimate state, never an empty object. |
+| `tiers` | `DiscountTierResponse[]` | The current price's discount tiers, inline, sorted by `quantityThreshold` ascending. **Empty array** (never `null`) when `currentPrice` is null or the price has no tiers. Tiers belong to the *current* price only — a superseded price's tiers never appear here. |
+
+**"Current price" selection & the `inDate` flag** — the single-source-of-truth rule this endpoint shares with price-resolution (3.8):
+
+- Current price = **the open row (`validTo` null) if one exists, else the row with the latest `validFrom`.** On a valid (non-overlapping) timeline that's the newest price version. An **expired** newest price is still returned, flagged `inDate: false` — it is *not* hidden, because hiding it would make an expired supplier look unpriced.
+- `inDate` = `SkuPrice#isInDate(today)`, derived at read time, never stored (same derivation the model documents above).
+- The row-selection is the **same shared logic** the price-resolution service resolves against (`SkuPriceSelection`), so "the current price flagged in-date" here and "a valid price exists today" there can never disagree — `SupplierSkuReadAgreementTest` proves agreement across an open row, a bounded in-date row, an expired newest row, and a never-priced SKU.
+
+`CurrentPriceView` = the same fields as `SkuPriceResponse` **plus** `inDate`:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `id` | `UUID` | The `SkuPrice` id. |
+| `skuId` | `UUID` | |
+| `unitPrice` | `UnitPrice` | `{ "amount": string, "currency": string }` — string amount, 4dp, per the Money contract (see Money above). |
+| `validFrom` | `LocalDate` | `yyyy-MM-dd`. |
+| `validTo` | `LocalDate` \| `null` | `yyyy-MM-dd`; `null` = open-ended. |
+| `inDate` | `boolean` | Derived: is `today` within `[validFrom, validTo]`. `false` for an expired (or not-yet-started) current price. |
+| `createdAt` | `Instant` | ISO-8601 UTC. |
+| `updatedAt` | `Instant` \| `null` | ISO-8601 UTC; `null` until the row is first modified. |
+
+Each `tiers` element is a `DiscountTierResponse`: `{ id: UUID, quantityThreshold: int, unitPrice: UnitPrice, createdAt: Instant }` (its currency is always the parent price's — see Discount tiers below).
+
+**Example** — three SKUs: priced-and-in-date (with a tier), priced-but-expired (`inDate: false`), never-priced (`currentPrice: null`, `tiers: []`):
+
+```json
+[
+  {
+    "sku": {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "supplierId": "22222222-2222-2222-2222-222222222222",
+      "code": "SKU-A", "description": "Blue widget", "status": "ACTIVE",
+      "cartonSize": 24,
+      "createdAt": "2026-08-10T09:15:32.123Z", "updatedAt": "2026-08-11T10:00:00Z"
+    },
+    "currentPrice": {
+      "id": "33333333-3333-3333-3333-333333333333",
+      "skuId": "11111111-1111-1111-1111-111111111111",
+      "unitPrice": { "amount": "2.0000", "currency": "USD" },
+      "validFrom": "2026-07-01", "validTo": null, "inDate": true,
+      "createdAt": "2026-07-01T00:00:00Z", "updatedAt": null
+    },
+    "tiers": [
+      {
+        "id": "44444444-4444-4444-4444-444444444444",
+        "quantityThreshold": 100,
+        "unitPrice": { "amount": "1.5000", "currency": "USD" },
+        "createdAt": "2026-07-01T00:00:00Z"
+      }
+    ]
+  },
+  {
+    "sku": {
+      "id": "55555555-5555-5555-5555-555555555555",
+      "supplierId": "22222222-2222-2222-2222-222222222222",
+      "code": "SKU-B", "description": "Red widget", "status": "ACTIVE",
+      "cartonSize": null,
+      "createdAt": "2026-05-01T00:00:00Z", "updatedAt": null
+    },
+    "currentPrice": {
+      "id": "66666666-6666-6666-6666-666666666666",
+      "skuId": "55555555-5555-5555-5555-555555555555",
+      "unitPrice": { "amount": "3.0000", "currency": "USD" },
+      "validFrom": "2026-05-01", "validTo": "2026-07-31", "inDate": false,
+      "createdAt": "2026-05-01T00:00:00Z", "updatedAt": null
+    },
+    "tiers": []
+  },
+  {
+    "sku": {
+      "id": "77777777-7777-7777-7777-777777777777",
+      "supplierId": "22222222-2222-2222-2222-222222222222",
+      "code": "SKU-C", "description": null, "status": "ACTIVE",
+      "cartonSize": null,
+      "createdAt": "2026-08-01T00:00:00Z", "updatedAt": null
+    },
+    "currentPrice": null,
+    "tiers": []
+  }
+]
+```
+
+**Bank details never appear on any supplier read.** Neither this endpoint nor `SupplierResponse` (see Suppliers) carries them: the default supplier read exposes only a **masked** account number (last 4) plus a `bankDetailsPresent` boolean, and a SKU read carries no bank fields at all. Full bank details are a separate, role-restricted read — `GET /api/suppliers/{id}/bank-details`, `ADMIN`/`FINANCE` only, returning `BankDetailsResponse` — and never leak into any list or SKU response.
+
 ---
 
 ## SKU & price entry / upload
@@ -241,7 +341,7 @@ An isolated, low-cost-to-reverse choice confined to `PaymentTerms#split`.
 - `POST /api/suppliers/{id}/skus/{skuId}/prices` — adds a new `SkuPrice` version to an existing SKU. `201`, body: `SkuPriceResponse`.
 - `PUT /api/suppliers/{id}/skus/{skuId}` — updates SKU-level metadata only (`code`, `description`, `status`) — **never** the price; price changes are always new versions via the endpoint above, never edits reachable from this one.
 - `POST /api/suppliers/{id}/price-file` — bulk upload, `multipart/form-data` with a `file` part. `201`, body: `{"rowsProcessed": n, "s3Key": "..."}`.
-- All four: tenant-scoped (cross-tenant/nonexistent supplier or SKU → `404`), mutation restricted to `ADMIN`/`PURCHASING`. No `GET`/list endpoints exist yet for SKUs or prices — out of scope for this story (not requested by its acceptance criteria); the create/update responses are the only way to read one back for now.
+- All four: tenant-scoped (cross-tenant/nonexistent supplier or SKU → `404`), mutation restricted to `ADMIN`/`PURCHASING`. The one SKU/price **list read** — `GET /api/suppliers/{id}/skus`, the supplier screen's one-call read — is documented under **Supplier SKU read** below; these write responses aren't the only way to read a SKU back any more.
 
 ### The supersession rule
 

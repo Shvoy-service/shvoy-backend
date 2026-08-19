@@ -4,8 +4,10 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -19,16 +21,22 @@ import com.shvoy.NotFoundException;
 import com.shvoy.TenantGuard;
 import com.shvoy.UnitPrice;
 import com.shvoy.ValidationException;
+import com.shvoy.suppliers.domain.DiscountTier;
 import com.shvoy.suppliers.domain.Sku;
 import com.shvoy.suppliers.domain.SkuPrice;
+import com.shvoy.suppliers.domain.SkuStatus;
 import com.shvoy.suppliers.domain.Supplier;
 import com.shvoy.suppliers.dto.CreateSkuRequest;
+import com.shvoy.suppliers.dto.CurrentPriceView;
+import com.shvoy.suppliers.dto.DiscountTierResponse;
 import com.shvoy.suppliers.dto.SkuPriceRequest;
 import com.shvoy.suppliers.dto.SkuPriceResponse;
 import com.shvoy.suppliers.dto.SkuResponse;
 import com.shvoy.suppliers.dto.SkuSummary;
 import com.shvoy.suppliers.dto.SkuWithPriceResponse;
+import com.shvoy.suppliers.dto.SupplierSkuView;
 import com.shvoy.suppliers.dto.UpdateSkuRequest;
+import com.shvoy.suppliers.repository.DiscountTierRepository;
 import com.shvoy.suppliers.repository.SkuPriceRepository;
 import com.shvoy.suppliers.repository.SkuRepository;
 import com.shvoy.suppliers.repository.SupplierRepository;
@@ -53,13 +61,16 @@ public class SkuService {
 
     private final SkuRepository skuRepository;
     private final SkuPriceRepository skuPriceRepository;
+    private final DiscountTierRepository discountTierRepository;
     private final SupplierRepository supplierRepository;
     private final JdbcTemplate jdbcTemplate;
 
     SkuService(SkuRepository skuRepository, SkuPriceRepository skuPriceRepository,
-            SupplierRepository supplierRepository, JdbcTemplate jdbcTemplate) {
+            DiscountTierRepository discountTierRepository, SupplierRepository supplierRepository,
+            JdbcTemplate jdbcTemplate) {
         this.skuRepository = skuRepository;
         this.skuPriceRepository = skuPriceRepository;
+        this.discountTierRepository = discountTierRepository;
         this.supplierRepository = supplierRepository;
         this.jdbcTemplate = jdbcTemplate;
     }
@@ -228,6 +239,65 @@ public class SkuService {
         } catch (DataIntegrityViolationException e) {
             throw new ConflictException(ErrorCode.DUPLICATE_SKU, "SKU code already exists for this supplier: " + sku.getCode());
         }
+    }
+
+    /**
+     * The supplier screen's one-call read (Story — supplier SKU read
+     * endpoint): a supplier's active SKUs, each with carton size (already on
+     * {@link SkuResponse}), its current price + derived in-date flag, and
+     * that price's discount tiers inline. History is deliberately excluded —
+     * see {@link SupplierSkuView}.
+     *
+     * <p>Bounded queries, not N+1: one {@code findAll} each for prices and
+     * tiers, grouped in Java (same findAll-and-filter convention as the rest
+     * of this service — see the class Javadoc), rather than a per-SKU price
+     * lookup and a per-price tier lookup. Hundreds of SKUs per supplier is
+     * the realistic size, so the query count must not scale with it.
+     *
+     * <p>Current-price selection is {@link SkuPriceSelection#current} — the
+     * exact same row-selection {@link PriceResolutionService} resolves
+     * against, so the in-date flag here and "a valid price exists today"
+     * there never diverge.
+     */
+    @Transactional(readOnly = true)
+    public List<SupplierSkuView> listSkus(UUID supplierId) {
+        findOwnSupplier(supplierId);
+        LocalDate today = LocalDate.now();
+
+        List<Sku> skus = skuRepository.findAll().stream()
+            .filter(s -> s.getSupplierId().equals(supplierId) && s.getStatus() == SkuStatus.ACTIVE)
+            .sorted(Comparator.comparing(Sku::getCode))
+            .toList();
+
+        Map<UUID, List<SkuPrice>> pricesBySku = skuPriceRepository.findAll().stream()
+            .collect(Collectors.groupingBy(SkuPrice::getSkuId));
+        Map<UUID, List<DiscountTier>> tiersByPrice = discountTierRepository.findAll().stream()
+            .collect(Collectors.groupingBy(DiscountTier::getSkuPriceId));
+
+        return skus.stream()
+            .map(sku -> toView(sku, pricesBySku.getOrDefault(sku.getId(), List.of()), tiersByPrice, today))
+            .toList();
+    }
+
+    private static SupplierSkuView toView(Sku sku, List<SkuPrice> pricesForSku,
+            Map<UUID, List<DiscountTier>> tiersByPrice, LocalDate today) {
+        Optional<SkuPrice> current = SkuPriceSelection.current(pricesForSku);
+        if (current.isEmpty()) {
+            return new SupplierSkuView(toSkuResponse(sku), null, List.of());
+        }
+
+        SkuPrice price = current.get();
+        CurrentPriceView currentPrice = new CurrentPriceView(price.getId(), price.getSkuId(), price.getUnitPrice(),
+            price.getValidFrom(), price.getValidTo(), price.isInDate(today), price.getCreatedAt(), price.getUpdatedAt());
+
+        String currency = price.getUnitPrice().currency();
+        List<DiscountTierResponse> tiers = tiersByPrice.getOrDefault(price.getId(), List.of()).stream()
+            .sorted(Comparator.comparingInt(DiscountTier::getQuantityThreshold))
+            .map(t -> new DiscountTierResponse(t.getId(), t.getQuantityThreshold(),
+                new UnitPrice(t.getUnitPriceAmount(), currency), t.getCreatedAt()))
+            .toList();
+
+        return new SupplierSkuView(toSkuResponse(sku), currentPrice, tiers);
     }
 
     @Transactional(readOnly = true)
