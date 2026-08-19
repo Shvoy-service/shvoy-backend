@@ -100,9 +100,17 @@ public class PriceResolutionService {
      * supersession rule keeps a SKU's prices non-overlapping. Defends
      * against that invariant somehow having been violated anyway (e.g. a
      * row inserted outside the normal write path) rather than assuming it
-     * always holds: picks the row with the latest validFrom deterministically
-     * and logs it as a data-integrity signal, since more than one match
-     * means something upstream is broken, not a case to silently paper over.
+     * always holds: picks the effective row deterministically and logs it as
+     * a data-integrity signal, since more than one match means something
+     * upstream is broken, not a case to silently paper over.
+     *
+     * The row-selection itself is {@link SkuPriceSelection#current} — the
+     * same tiebreak the supplier SKU read (SkuService#listSkus) uses to pick
+     * a SKU's current price, so "the price valid today" here and "the current
+     * price flagged in-date" there can never disagree (see that method's
+     * Javadoc and SupplierSkuReadAgreementTest). Applied to the in-date
+     * candidates it is behaviour-identical to the previous latest-validFrom
+     * pick on all valid data.
      */
     private Optional<SkuPrice> resolveApplicablePrice(UUID skuId, List<SkuPrice> allPricesForSku, LocalDate asOfDate) {
         List<SkuPrice> candidates = allPricesForSku.stream()
@@ -113,7 +121,7 @@ public class PriceResolutionService {
                     + "supersession invariant (Story 3.5) has been violated; resolving to the latest validFrom",
                 candidates.size(), skuId, asOfDate);
         }
-        return candidates.stream().max(Comparator.comparing(SkuPrice::getValidFrom));
+        return SkuPriceSelection.current(candidates);
     }
 
     /**
