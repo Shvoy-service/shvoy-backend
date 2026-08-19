@@ -9,6 +9,7 @@ import com.shvoy.ConflictException;
 import com.shvoy.CurrentUserContext;
 import com.shvoy.EmailAttachment;
 import com.shvoy.EmailMessage;
+import com.shvoy.EmailSource;
 import com.shvoy.EmailSender;
 import com.shvoy.ErrorCode;
 import com.shvoy.purchaseorders.domain.PurchaseOrder;
@@ -81,7 +82,8 @@ public class PurchaseOrderSendService {
             supplier.contactEmail(),
             "Purchase Order " + purchaseOrder.getPoNumber(),
             "Please find attached Purchase Order " + purchaseOrder.getPoNumber() + " from " + supplier.name() + ".",
-            new EmailAttachment(purchaseOrder.getPoNumber() + ".pdf", "application/pdf", document)));
+            new EmailAttachment(purchaseOrder.getPoNumber() + ".pdf", "application/pdf", document),
+            EmailSource.PURCHASE_ORDER, purchaseOrder.getPoNumber()));
 
         purchaseOrderSendRepository.save(new PurchaseOrderSend(
             purchaseOrderId, CurrentUserContext.get(), supplier.contactEmail(), purchaseOrder.getDocumentS3Key()));

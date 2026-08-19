@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import com.shvoy.EmailMessage;
+import com.shvoy.EmailSource;
 import com.shvoy.EmailSender;
 import com.shvoy.NotFoundException;
 import com.shvoy.TenantGuard;
@@ -60,7 +61,8 @@ public class ApproverNotifier {
                 recipient,
                 "Proforma invoice awaiting your approval",
                 "Proforma invoice " + pi.getPiReference() + " has been routed for approval. "
-                    + "Please review the reconciliation and approve or reject it."));
+                    + "Please review the reconciliation and approve or reject it.",
+                EmailSource.APPROVAL_REQUEST, pi.getPiReference()));
         }
     }
 }
