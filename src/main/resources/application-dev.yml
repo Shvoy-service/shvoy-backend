@@ -26,6 +26,11 @@ cognito:
   user-pool-id: ${COGNITO_USER_POOL_ID}
   app-client-id: ${COGNITO_APP_CLIENT_ID}
 
+# The verified SES sender identity (Story 9.4). A verified address on the verified
+# from-domain; SES uses the ECS task role's scoped ses:SendEmail — no SMTP creds.
+email:
+  sender: ${EMAIL_SENDER}
+
 # No default: Cloudflare Pages isn't connected yet, so the real value isn't
 # known. Deliberately left unresolved (fails startup rather than silently
 # allowing nothing, or nothing safe) until it's set. Preview deploys use

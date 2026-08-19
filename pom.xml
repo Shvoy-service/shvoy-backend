@@ -140,6 +140,11 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>cognitoidentityprovider</artifactId>
         </dependency>
+        <!-- Real email delivery behind the EmailSender seam (dev/prod only; local/test keep ConsoleEmailSender) — Story 9.4. -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>sesv2</artifactId>
+        </dependency>
 
         <!-- Validates Cognito-issued JWTs as a resource server (dev/prod only, see SecurityConfig). -->
         <dependency>

@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import com.shvoy.EmailMessage;
+import com.shvoy.EmailSource;
 import com.shvoy.EmailSender;
 import com.shvoy.onboarding.service.UserDirectoryService;
 
@@ -43,7 +44,8 @@ class DiscrepancyNotifier {
                 "A payment is blocked and needs resolution",
                 "The three-way match blocked the payment for " + poNumber + ". Discrepancy: " + failureDetail
                     + " Please review the side-by-side and resolve it (correct the data, agree a credit, "
-                    + "accept the difference, or dispute it)."));
+                    + "accept the difference, or dispute it).",
+                EmailSource.DISCREPANCY, poNumber));
         }
     }
 }

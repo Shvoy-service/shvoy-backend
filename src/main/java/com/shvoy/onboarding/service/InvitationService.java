@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.shvoy.ConflictException;
 import com.shvoy.EmailMessage;
+import com.shvoy.EmailSource;
 import com.shvoy.EmailSender;
 import com.shvoy.ErrorCode;
 import com.shvoy.NotFoundException;
@@ -100,7 +101,8 @@ public class InvitationService {
         // EmailSender's Javadoc. ConsoleEmailSender logs this for now so the
         // flow is testable end to end without it.
         emailSender.send(new EmailMessage(request.email(), "You've been invited to SHVOY",
-            "Invite link for " + request.email() + ": /api/onboarding/activate?token=" + rawToken));
+            "Invite link for " + request.email() + ": /api/onboarding/activate?token=" + rawToken,
+            EmailSource.INVITATION, request.email()));
 
         return new InviteResponse(user.getEmail(), user.getRole(), user.getStatus());
     }
