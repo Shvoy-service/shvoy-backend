@@ -31,19 +31,25 @@ cognito:
 email:
   sender: ${EMAIL_SENDER}
 
-# No default: Cloudflare Pages isn't connected yet, so the real value isn't
-# known. Deliberately left unresolved (fails startup rather than silently
-# allowing nothing, or nothing safe) until it's set. Preview deploys use
-# per-PR subdomains, so this will likely need a wildcard pattern, e.g.
-# https://*.<project>.pages.dev — CorsConfig uses allowedOriginPatterns
-# specifically so that's expressible once the exact domain is known.
+# No default: deliberately left unresolved (fails startup rather than silently
+# allowing nothing, or nothing safe) until it's set. Cloudflare Pages is now
+# connected (verified against the dev ECS task definition, 2026-08-20): the
+# task sets this to the localhost dev/preview ports plus
+# https://shvoy.pages.dev and the per-PR preview wildcard
+# https://*.shvoy.pages.dev — the wildcard being exactly why CorsConfig uses
+# allowedOriginPatterns.
 shvoy:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS}
-  # No default, same reasoning as the CORS origins above: the Cloudflare Pages
-  # URL isn't known yet. Email links point humans at this host — a wrong or
-  # missing value sends them nowhere — so fail startup until it's set rather
-  # than bake in a guess.
+  # No default, same fail-startup reasoning as the CORS origins above: email
+  # links point humans at this host, and a wrong or missing value sends them
+  # nowhere. The right dev value is known now that Pages is connected —
+  # https://shvoy.pages.dev — but it is NOT yet set on the dev ECS task
+  # definition (nor is EMAIL_SENDER, and no SES identity is verified yet —
+  # A9's console half is unexecuted), so the first deploy of a build
+  # containing FrontendLinks/SesEmailSender will fail startup until both env
+  # vars are added. That failure is this comment's point: loud, at deploy,
+  # not a silent wrong link in someone's inbox.
   frontend:
     base-url: ${FRONTEND_BASE_URL}
 
