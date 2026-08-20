@@ -8,6 +8,7 @@ package com.shvoy;
  * send} contract and the consumers' fire-and-forget behaviour are unchanged.
  */
 public enum EmailSource {
+    REGISTRATION,
     INVITATION,
     PURCHASE_ORDER,
     APPROVAL_REQUEST,
