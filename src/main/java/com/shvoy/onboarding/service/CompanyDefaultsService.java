@@ -31,4 +31,14 @@ public class CompanyDefaultsService {
     public Optional<String> defaultDeliveryAddress(UUID companyId) {
         return companyRepository.findById(companyId).map(Company::getDefaultDeliveryAddress);
     }
+
+    /**
+     * The company's display name — what {@code purchaseorders} puts on a PO email
+     * so the supplier sees who the order is from (Story 9.5), and what the invite
+     * email names as the company you're joining.
+     */
+    @Transactional(readOnly = true)
+    public Optional<String> companyName(UUID companyId) {
+        return companyRepository.findById(companyId).map(Company::getName);
+    }
 }

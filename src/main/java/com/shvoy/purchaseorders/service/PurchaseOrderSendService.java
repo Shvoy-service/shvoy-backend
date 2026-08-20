@@ -8,10 +8,13 @@ import org.springframework.transaction.annotation.Transactional;
 import com.shvoy.ConflictException;
 import com.shvoy.CurrentUserContext;
 import com.shvoy.EmailAttachment;
+import com.shvoy.EmailContent;
 import com.shvoy.EmailMessage;
 import com.shvoy.EmailSource;
 import com.shvoy.EmailSender;
 import com.shvoy.ErrorCode;
+import com.shvoy.TenantContext;
+import com.shvoy.onboarding.service.CompanyDefaultsService;
 import com.shvoy.purchaseorders.domain.PurchaseOrder;
 import com.shvoy.purchaseorders.domain.PurchaseOrderSend;
 import com.shvoy.purchaseorders.domain.PurchaseOrderStatus;
@@ -51,19 +54,25 @@ public class PurchaseOrderSendService {
     private final PurchaseOrderGenerationService purchaseOrderGenerationService;
     private final SupplierService supplierService;
     private final EmailSender emailSender;
+    private final PurchaseOrderEmailComposer purchaseOrderEmailComposer;
+    private final CompanyDefaultsService companyDefaultsService;
 
     PurchaseOrderSendService(PurchaseOrderService purchaseOrderService,
             PurchaseOrderRepository purchaseOrderRepository,
             PurchaseOrderSendRepository purchaseOrderSendRepository,
             PurchaseOrderGenerationService purchaseOrderGenerationService,
             SupplierService supplierService,
-            EmailSender emailSender) {
+            EmailSender emailSender,
+            PurchaseOrderEmailComposer purchaseOrderEmailComposer,
+            CompanyDefaultsService companyDefaultsService) {
         this.purchaseOrderService = purchaseOrderService;
         this.purchaseOrderRepository = purchaseOrderRepository;
         this.purchaseOrderSendRepository = purchaseOrderSendRepository;
         this.purchaseOrderGenerationService = purchaseOrderGenerationService;
         this.supplierService = supplierService;
         this.emailSender = emailSender;
+        this.purchaseOrderEmailComposer = purchaseOrderEmailComposer;
+        this.companyDefaultsService = companyDefaultsService;
     }
 
     @Transactional
@@ -78,10 +87,13 @@ public class PurchaseOrderSendService {
         }
 
         byte[] document = purchaseOrderGenerationService.getDocument(purchaseOrderId);
+        String buyerCompanyName = companyDefaultsService.companyName(TenantContext.get()).orElse("your customer");
+        EmailContent content = purchaseOrderEmailComposer.compose(
+            purchaseOrder.getPoNumber(), buyerCompanyName, supplier.name());
         emailSender.send(new EmailMessage(
             supplier.contactEmail(),
-            "Purchase Order " + purchaseOrder.getPoNumber(),
-            "Please find attached Purchase Order " + purchaseOrder.getPoNumber() + " from " + supplier.name() + ".",
+            content.subject(),
+            content.body(),
             new EmailAttachment(purchaseOrder.getPoNumber() + ".pdf", "application/pdf", document),
             EmailSource.PURCHASE_ORDER, purchaseOrder.getPoNumber()));
 

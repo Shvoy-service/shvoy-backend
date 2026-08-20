@@ -236,7 +236,10 @@ class InviteAcceptanceControllerTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"email\":\"" + email + "\",\"role\":\"" + role + "\"}"))
                 .andExpect(status().isCreated());
-            return LogCapture.valueAfter(logs.firstMessageContaining("Invite link for " + email), "token=");
+            // The raw token now lives only inside the frontend accept link; it runs to the
+            // next newline in the (multi-line) email body.
+            return LogCapture.valueAfter(logs.firstMessageContaining("/invite/accept?token="), "token=")
+                .split("\\s", 2)[0];
         }
     }
 

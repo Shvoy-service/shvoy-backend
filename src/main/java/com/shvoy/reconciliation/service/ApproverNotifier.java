@@ -7,27 +7,32 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import com.shvoy.EmailContent;
 import com.shvoy.EmailMessage;
 import com.shvoy.EmailSource;
 import com.shvoy.EmailSender;
 import com.shvoy.NotFoundException;
 import com.shvoy.TenantGuard;
 import com.shvoy.onboarding.service.ApproverPoolService;
+import com.shvoy.onboarding.service.UserDirectoryService;
+import com.shvoy.purchaseorders.dto.PurchaseOrderSummary;
+import com.shvoy.purchaseorders.service.PurchaseOrderService;
 import com.shvoy.reconciliation.domain.ProformaInvoice;
 import com.shvoy.reconciliation.repository.ProformaInvoiceRepository;
+import com.shvoy.suppliers.dto.SupplierSummary;
+import com.shvoy.suppliers.service.SupplierService;
 
 /**
- * Notifies the approver pool that a routed PI awaits sign-off (Story 5.5),
- * through the shared {@link EmailSender} seam built in 4.7 — the third
- * consumer (after invites and PO send), which is a good sign that seam was
- * pitched at the right level: the day a real SES implementation replaces
- * {@code ConsoleEmailSender}, all three light up at once.
+ * Notifies the right approvers that a routed PI awaits sign-off (Story 5.5),
+ * through the shared {@link EmailSender} seam built in 4.7.
  *
- * <p>Stub-grade by design (console-logged until the Notifications feature
- * lands): it notifies the currently-eligible <em>pool</em> approvers. On the
- * single-approver (non-increase) path a role-only approver who isn't in the
- * pool could also act but isn't separately emailed here — an acceptable
- * simplification for the stub, noted for the real Notifications work.
+ * <p>Recipients branch on the same rule that governs the gate itself (defined
+ * once in {@link PiApprovalService#requiresPriceIncreaseSignOff}): a PI with a
+ * unit-price increase beyond tolerance needs 2-of-N sign-off, so it goes to the
+ * currently-<em>eligible pool</em>; any other routed PI can be confirmed by a
+ * single approver, so it goes to <em>all active {@code APPROVER}-role holders</em>.
+ * The content (which order, supplier, whether it's a price increase, the link)
+ * is the composer's; this class owns only the recipient decision.
  */
 @Service
 public class ApproverNotifier {
@@ -36,12 +41,25 @@ public class ApproverNotifier {
 
     private final ProformaInvoiceRepository proformaInvoiceRepository;
     private final ApproverPoolService approverPoolService;
+    private final UserDirectoryService userDirectoryService;
+    private final PiApprovalService piApprovalService;
+    private final PurchaseOrderService purchaseOrderService;
+    private final SupplierService supplierService;
+    private final ApprovalRequestEmailComposer approvalRequestEmailComposer;
     private final EmailSender emailSender;
 
     ApproverNotifier(ProformaInvoiceRepository proformaInvoiceRepository,
-            ApproverPoolService approverPoolService, EmailSender emailSender) {
+            ApproverPoolService approverPoolService, UserDirectoryService userDirectoryService,
+            PiApprovalService piApprovalService, PurchaseOrderService purchaseOrderService,
+            SupplierService supplierService, ApprovalRequestEmailComposer approvalRequestEmailComposer,
+            EmailSender emailSender) {
         this.proformaInvoiceRepository = proformaInvoiceRepository;
         this.approverPoolService = approverPoolService;
+        this.userDirectoryService = userDirectoryService;
+        this.piApprovalService = piApprovalService;
+        this.purchaseOrderService = purchaseOrderService;
+        this.supplierService = supplierService;
+        this.approvalRequestEmailComposer = approvalRequestEmailComposer;
         this.emailSender = emailSender;
     }
 
@@ -50,18 +68,26 @@ public class ApproverNotifier {
             .orElseThrow(() -> new NotFoundException("Proforma invoice not found"));
         TenantGuard.assertOwned(pi);
 
-        List<String> recipients = approverPoolService.resolveEligibleApproverEmails();
+        boolean priceIncreaseSignOff = piApprovalService.requiresPriceIncreaseSignOff(proformaInvoiceId);
+        List<String> recipients = priceIncreaseSignOff
+            ? approverPoolService.resolveEligibleApproverEmails()
+            : userDirectoryService.resolveApproverRoleEmails();
         if (recipients.isEmpty()) {
-            log.info("PI {} ({}) routed for approval, but the approver pool has no eligible members to notify",
-                proformaInvoiceId, pi.getPiReference());
+            log.info("PI {} ({}) routed for approval, but there are no {} to notify",
+                proformaInvoiceId, pi.getPiReference(),
+                priceIncreaseSignOff ? "eligible approver-pool members" : "active APPROVER-role users");
             return;
         }
+
+        PurchaseOrderSummary po = purchaseOrderService.getSummary(pi.getPurchaseOrderId());
+        SupplierSummary supplier = supplierService.getSummary(po.supplierId());
+        EmailContent content = approvalRequestEmailComposer.compose(
+            po.poNumber(), supplier.name(), priceIncreaseSignOff,
+            approverPoolService.requiredSignOffCount(), proformaInvoiceId);
+
         for (String recipient : recipients) {
             emailSender.send(new EmailMessage(
-                recipient,
-                "Proforma invoice awaiting your approval",
-                "Proforma invoice " + pi.getPiReference() + " has been routed for approval. "
-                    + "Please review the reconciliation and approve or reject it.",
+                recipient, content.subject(), content.body(),
                 EmailSource.APPROVAL_REQUEST, pi.getPiReference()));
         }
     }

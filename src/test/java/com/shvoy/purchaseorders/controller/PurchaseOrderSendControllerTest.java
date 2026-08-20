@@ -203,7 +203,10 @@ class PurchaseOrderSendControllerTest {
                 .andExpect(jsonPath("$.sentBy").value(userAId.toString()))
                 .andExpect(jsonPath("$.sentAt").exists());
 
-            logs.firstMessageContaining("sales@supplier-a.example");
+            // The PO email carries the generated PDF as an attachment — the one external
+            // recipient shouldn't need portal access to receive their order.
+            String emailLog = logs.firstMessageContaining("sales@supplier-a.example");
+            assertThat(emailLog).contains("attachment=").contains(".pdf").contains("application/pdf");
         }
 
         Long sendCount = jdbcTemplate.queryForObject(

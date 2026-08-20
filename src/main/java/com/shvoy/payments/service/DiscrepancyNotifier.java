@@ -1,11 +1,13 @@
 package com.shvoy.payments.service;
 
 import java.util.List;
+import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import com.shvoy.EmailContent;
 import com.shvoy.EmailMessage;
 import com.shvoy.EmailSource;
 import com.shvoy.EmailSender;
@@ -15,9 +17,10 @@ import com.shvoy.onboarding.service.UserDirectoryService;
  * Notifies the discrepancy resolvers that a payment is blocked and needs
  * resolution (Story 6.6), through the shared {@link EmailSender} seam (4.7) —
  * the <strong>fourth</strong> consumer after invites, PO send, and approvals.
- * Stub-grade (console until Notifications lands), same posture as {@code
- * ApproverNotifier}: it addresses the claimable queue — every active {@code
- * PURCHASING}/{@code ADMIN} user — since no one is assigned until someone claims.
+ * It addresses the claimable queue — every active {@code PURCHASING}/{@code
+ * ADMIN} user — since no one is assigned until someone claims (a claimed →
+ * claimer notification has no trigger yet: the only notification is at open
+ * time, when nothing is claimed). Content and the case link are the composer's.
  */
 @Service
 class DiscrepancyNotifier {
@@ -25,26 +28,26 @@ class DiscrepancyNotifier {
     private static final Logger log = LoggerFactory.getLogger(DiscrepancyNotifier.class);
 
     private final UserDirectoryService userDirectoryService;
+    private final DiscrepancyEmailComposer discrepancyEmailComposer;
     private final EmailSender emailSender;
 
-    DiscrepancyNotifier(UserDirectoryService userDirectoryService, EmailSender emailSender) {
+    DiscrepancyNotifier(UserDirectoryService userDirectoryService,
+            DiscrepancyEmailComposer discrepancyEmailComposer, EmailSender emailSender) {
         this.userDirectoryService = userDirectoryService;
+        this.discrepancyEmailComposer = discrepancyEmailComposer;
         this.emailSender = emailSender;
     }
 
-    void notifyOpened(String poNumber, String failureDetail) {
+    void notifyOpened(String poNumber, String failureDetail, UUID caseId) {
         List<String> recipients = userDirectoryService.resolveDiscrepancyResolverEmails();
         if (recipients.isEmpty()) {
             log.info("Discrepancy opened for PO {}, but there are no active PURCHASING/ADMIN users to notify", poNumber);
             return;
         }
+        EmailContent content = discrepancyEmailComposer.compose(poNumber, failureDetail, caseId);
         for (String recipient : recipients) {
             emailSender.send(new EmailMessage(
-                recipient,
-                "A payment is blocked and needs resolution",
-                "The three-way match blocked the payment for " + poNumber + ". Discrepancy: " + failureDetail
-                    + " Please review the side-by-side and resolve it (correct the data, agree a credit, "
-                    + "accept the difference, or dispute it).",
+                recipient, content.subject(), content.body(),
                 EmailSource.DISCREPANCY, poNumber));
         }
     }

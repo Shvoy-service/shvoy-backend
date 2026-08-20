@@ -156,6 +156,17 @@ public class PiApprovalService {
     // --- the core rule ---
 
     /**
+     * Whether the routed PI's latest reconciliation trips the 2-of-N gate — the
+     * single definition of that rule ({@link #requiresSignOff}), exposed for
+     * Story 5.5's notifier to branch its recipients (eligible pool vs any
+     * APPROVER-role holder) and word the email, without duplicating the rule.
+     */
+    @Transactional(readOnly = true)
+    public boolean requiresPriceIncreaseSignOff(UUID proformaInvoiceId) {
+        return requiresSignOff(latestReconciliation(proformaInvoiceId));
+    }
+
+    /**
      * The 2-of-N gate applies iff <strong>any</strong> matched line is a price
      * increase beyond tolerance — the conservative reading confirmed for the
      * whole-PI rule: a PI containing a price rise shouldn't escape the gate

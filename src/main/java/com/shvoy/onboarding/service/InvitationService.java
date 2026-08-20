@@ -12,6 +12,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.shvoy.ConflictException;
+import com.shvoy.CurrentUserContext;
+import com.shvoy.EmailContent;
 import com.shvoy.EmailMessage;
 import com.shvoy.EmailSource;
 import com.shvoy.EmailSender;
@@ -56,11 +58,16 @@ public class InvitationService {
     private final UserRepository userRepository;
     private final JdbcTemplate jdbcTemplate;
     private final EmailSender emailSender;
+    private final InviteEmailComposer inviteEmailComposer;
+    private final CompanyDefaultsService companyDefaultsService;
 
-    InvitationService(UserRepository userRepository, JdbcTemplate jdbcTemplate, EmailSender emailSender) {
+    InvitationService(UserRepository userRepository, JdbcTemplate jdbcTemplate, EmailSender emailSender,
+            InviteEmailComposer inviteEmailComposer, CompanyDefaultsService companyDefaultsService) {
         this.userRepository = userRepository;
         this.jdbcTemplate = jdbcTemplate;
         this.emailSender = emailSender;
+        this.inviteEmailComposer = inviteEmailComposer;
+        this.companyDefaultsService = companyDefaultsService;
     }
 
     @Transactional
@@ -97,14 +104,23 @@ public class InvitationService {
             }
         }
 
-        // Real email delivery is a separate (Notifications) feature — see
-        // EmailSender's Javadoc. ConsoleEmailSender logs this for now so the
-        // flow is testable end to end without it.
-        emailSender.send(new EmailMessage(request.email(), "You've been invited to SHVOY",
-            "Invite link for " + request.email() + ": /api/onboarding/activate?token=" + rawToken,
+        // Content (subject, body, the accept link built from the frontend base
+        // URL) is the composer's; the raw token appears only inside that link.
+        String companyName = companyDefaultsService.companyName(callerCompanyId).orElse("your company");
+        EmailContent content = inviteEmailComposer.compose(companyName, resolveInviterEmail(), rawToken, expiresAt);
+        emailSender.send(new EmailMessage(request.email(), content.subject(), content.body(),
             EmailSource.INVITATION, request.email()));
 
         return new InviteResponse(user.getEmail(), user.getRole(), user.getStatus());
+    }
+
+    /** The invite's sender, for the "who invited you" line — null (attribution dropped) if unresolvable. */
+    private String resolveInviterEmail() {
+        UUID callerId = CurrentUserContext.getOrNull();
+        if (callerId == null) {
+            return null;
+        }
+        return userRepository.findById(callerId).map(User::getEmail).orElse(null);
     }
 
     private Map<String, Object> findByEmail(String email) {

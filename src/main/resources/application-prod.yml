@@ -22,6 +22,10 @@ cognito:
 shvoy:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS}
+  # No default: the production frontend domain isn't decided yet. Email links
+  # point at this host — see application-dev.yml's frontend comment.
+  frontend:
+    base-url: ${FRONTEND_BASE_URL}
 
 # Spec/UI stay enabled (springdoc's default) in local/dev — only prod turns
 # them off, since there's no reason to expose API surface details publicly
