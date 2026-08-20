@@ -82,6 +82,7 @@ public class ContainerFillOfferViewService {
             offer.getStatus(),
             offer.getDeadline(),
             offer.getReminderSentAt(),
+            offer.getFillPurchaseOrderId(),
             offer.getNotes(),
             offer.getFlaggedBy(),
             offer.getCreatedAt(),

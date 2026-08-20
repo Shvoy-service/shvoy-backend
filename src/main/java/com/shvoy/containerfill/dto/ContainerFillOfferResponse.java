@@ -22,6 +22,7 @@ public record ContainerFillOfferResponse(
     ContainerFillOfferStatus status,
     Instant deadline,
     Instant reminderSentAt,
+    UUID fillPurchaseOrderId,
     String notes,
     UUID flaggedBy,
     Instant createdAt,

@@ -16,10 +16,14 @@ import com.shvoy.containerfill.domain.ContainerFillOfferAuditEvent;
 import com.shvoy.containerfill.domain.ContainerFillOfferAuditEventType;
 import com.shvoy.containerfill.domain.ContainerFillOfferStatus;
 import com.shvoy.containerfill.dto.CancelContainerFillOfferRequest;
+import com.shvoy.containerfill.dto.ConfirmContainerFillOfferRequest;
+import com.shvoy.containerfill.dto.DeclineContainerFillOfferRequest;
 import com.shvoy.containerfill.dto.FlagContainerFillOfferRequest;
+import com.shvoy.containerfill.dto.LinkFillPurchaseOrderRequest;
 import com.shvoy.containerfill.dto.SetContainerFillDeadlineRequest;
 import com.shvoy.containerfill.repository.ContainerFillOfferAuditEventRepository;
 import com.shvoy.containerfill.repository.ContainerFillOfferRepository;
+import com.shvoy.purchaseorders.service.PurchaseOrderService;
 import com.shvoy.shipments.service.ShipmentAccessService;
 import com.shvoy.suppliers.service.SupplierService;
 
@@ -35,13 +39,16 @@ public class ContainerFillOfferService {
 
     private final ShipmentAccessService shipmentAccessService;
     private final SupplierService supplierService;
+    private final PurchaseOrderService purchaseOrderService;
     private final ContainerFillOfferRepository offerRepository;
     private final ContainerFillOfferAuditEventRepository auditRepository;
 
     ContainerFillOfferService(ShipmentAccessService shipmentAccessService, SupplierService supplierService,
-            ContainerFillOfferRepository offerRepository, ContainerFillOfferAuditEventRepository auditRepository) {
+            PurchaseOrderService purchaseOrderService, ContainerFillOfferRepository offerRepository,
+            ContainerFillOfferAuditEventRepository auditRepository) {
         this.shipmentAccessService = shipmentAccessService;
         this.supplierService = supplierService;
+        this.purchaseOrderService = purchaseOrderService;
         this.offerRepository = offerRepository;
         this.auditRepository = auditRepository;
     }
@@ -108,6 +115,64 @@ public class ContainerFillOfferService {
             audit(offer, ContainerFillOfferAuditEventType.DEADLINE_REVISED,
                 "Deadline revised from " + previous + " to " + request.deadline() + reasonSuffix(request.reason()));
         }
+    }
+
+    /**
+     * Confirm the offer (Story 8.3) — decide to fill it. Optionally links the fill
+     * PO now (validated for existence + ownership only; the 7.3 attach enforces its
+     * GENERATED/SENT state later). No existing PO is mutated — the fill is a new
+     * Feature-4 order that rides the container. Terminal.
+     */
+    @Transactional
+    public void confirm(UUID offerId, ConfirmContainerFillOfferRequest request) {
+        ContainerFillOffer offer = findOwnOffer(offerId);
+        assertDecidable(offer);
+        UUID fillPoId = request.fillPurchaseOrderId();
+        if (fillPoId != null) {
+            purchaseOrderService.assertOwnPurchaseOrderExists(fillPoId);
+        }
+        offer.confirm(fillPoId);
+        offerRepository.save(offer);
+        audit(offer, ContainerFillOfferAuditEventType.CONFIRMED,
+            "Confirmed" + (fillPoId != null ? " with fill PO " + fillPoId : "") + deadlineStateSuffix(offer));
+    }
+
+    /** Decline the offer (Story 8.3) — ship without. Complete in itself; terminal. */
+    @Transactional
+    public void decline(UUID offerId, DeclineContainerFillOfferRequest request) {
+        ContainerFillOffer offer = findOwnOffer(offerId);
+        assertDecidable(offer);
+        offer.decline();
+        offerRepository.save(offer);
+        audit(offer, ContainerFillOfferAuditEventType.DECLINED,
+            "Declined" + reasonSuffix(request.reason()) + deadlineStateSuffix(offer));
+    }
+
+    /** Wire the fill PO to an already-confirmed offer (Story 8.3) — the "decide now, raise the PO later" step. */
+    @Transactional
+    public void linkFillPurchaseOrder(UUID offerId, LinkFillPurchaseOrderRequest request) {
+        ContainerFillOffer offer = findOwnOffer(offerId);
+        if (offer.getStatus() != ContainerFillOfferStatus.CONFIRMED) {
+            throw new ConflictException(ErrorCode.CONTAINER_FILL_OFFER_NOT_CONFIRMED,
+                "A fill PO can only be linked to a confirmed offer (status " + offer.getStatus() + ")");
+        }
+        purchaseOrderService.assertOwnPurchaseOrderExists(request.fillPurchaseOrderId());
+        offer.linkFillPurchaseOrder(request.fillPurchaseOrderId());
+        offerRepository.save(offer);
+        audit(offer, ContainerFillOfferAuditEventType.FILL_PO_LINKED,
+            "Linked fill PO " + request.fillPurchaseOrderId());
+    }
+
+    private void assertDecidable(ContainerFillOffer offer) {
+        if (!offer.isDecidable()) {
+            throw new ConflictException(ErrorCode.CONTAINER_FILL_OFFER_NOT_DECIDABLE,
+                "Container-fill offer is already resolved (status " + offer.getStatus() + ")");
+        }
+    }
+
+    /** Records the deadline state a decision was taken against — "we never clocked it" vs "we beat the clock". */
+    private static String deadlineStateSuffix(ContainerFillOffer offer) {
+        return offer.getDeadline() == null ? " (no deadline was set)" : " (deadline was " + offer.getDeadline() + ")";
     }
 
     private static String reasonSuffix(String reason) {

@@ -1137,6 +1137,7 @@ Rule: business dates are `LocalDate` (serialises as `yyyy-MM-dd`), real points i
 - **Entry (the wire):** the API accepts the **`Instant` itself** (ISO-8601 UTC, e.g. `2026-10-25T17:00:00Z`) on `PUT /api/container-fill-offers/{id}/deadline`. The **frontend** owns the London→UTC conversion (the entry UX is London-labelled) before sending — so the backend never parses an ambiguous local time. One conversion, one place.
 - **Display:** render the stored `Instant` in `Europe/London` **explicitly** (with the zone label) — never browser-local. The reminder email does this server-side (emails have no browser); list/single responses return the raw `Instant` and the frontend renders it in `Europe/London`.
 - **Zone rules, never a fixed offset** — BST (+01:00) and GMT (+00:00) must both resolve correctly across the clocks-change weekends. **Worked DST example:** a `17:00` London deadline on **2026-10-25** (the clocks-back Sunday — 17:00 is already GMT that day) is the instant `2026-10-25T17:00:00Z`; a `17:00` London deadline on **2026-07-01** (summer, BST +01:00) is `2026-07-01T16:00:00Z`. Both render back as `17:00 (Europe/London)`.
+- **Lapse boundary (Story 8.3), pinned exclusive:** an undecided offer lapses to `LAPSED` iff **`now > deadline`** (strict) — deciding *at* the deadline instant still succeeds. Same exclusive-boundary discipline as the ±2% tolerance's `<`. The decide-vs-lapse race at the boundary is settled by the status transition guards (first commit wins; the loser gets `CONTAINER_FILL_OFFER_NOT_DECIDABLE`).
 
 ---
 

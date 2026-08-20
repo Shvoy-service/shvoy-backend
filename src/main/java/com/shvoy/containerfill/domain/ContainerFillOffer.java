@@ -56,6 +56,9 @@ public class ContainerFillOffer extends TenantScoped {
     @Column(name = "reminder_sent_at")
     private Instant reminderSentAt;
 
+    @Column(name = "fill_po_id")
+    private UUID fillPurchaseOrderId;
+
     @Column(name = "notes", length = 2000)
     private String notes;
 
@@ -108,6 +111,36 @@ public class ContainerFillOffer extends TenantScoped {
         this.updatedAt = Instant.now();
     }
 
+    /** The human decides to fill it (Story 8.3) — CONFIRMED, optionally linking the fill PO now. */
+    public void confirm(UUID fillPurchaseOrderId) {
+        this.status = ContainerFillOfferStatus.CONFIRMED;
+        this.fillPurchaseOrderId = fillPurchaseOrderId;
+        this.updatedAt = Instant.now();
+    }
+
+    /** The human decides to ship without (Story 8.3) — DECLINED. */
+    public void decline() {
+        this.status = ContainerFillOfferStatus.DECLINED;
+        this.updatedAt = Instant.now();
+    }
+
+    /** The deadline passed undecided (Story 8.3, system action) — LAPSED, distinct from DECLINED. */
+    public void lapse() {
+        this.status = ContainerFillOfferStatus.LAPSED;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Wire the fill PO to an already-confirmed offer — the two-step "decide now, raise the PO later" (Story 8.3). */
+    public void linkFillPurchaseOrder(UUID fillPurchaseOrderId) {
+        this.fillPurchaseOrderId = fillPurchaseOrderId;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Decidable = still open or awaiting a decision (deciding an offer nobody put a clock on is legitimate). */
+    public boolean isDecidable() {
+        return status == ContainerFillOfferStatus.OPEN || status == ContainerFillOfferStatus.AWAITING_DECISION;
+    }
+
     /** Undecided = still in the operational queue: flagged or awaiting a decision, not yet decided/cancelled. */
     public boolean isUndecided() {
         return status == ContainerFillOfferStatus.OPEN || status == ContainerFillOfferStatus.AWAITING_DECISION;
@@ -144,6 +177,10 @@ public class ContainerFillOffer extends TenantScoped {
 
     public Instant getReminderSentAt() {
         return reminderSentAt;
+    }
+
+    public UUID getFillPurchaseOrderId() {
+        return fillPurchaseOrderId;
     }
 
     public String getNotes() {
