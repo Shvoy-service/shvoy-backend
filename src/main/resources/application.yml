@@ -16,6 +16,13 @@ aws:
   s3:
     documents-bucket: ${S3_DOCUMENTS_BUCKET:shvoy-documents}
 
+# The container-fill reminder poll (Story 8.2). Restart-safe DB-state poll — the
+# interval is just how often it looks for due reminders; missing one tick only
+# delays a reminder by that long, never loses it. 5 minutes is ample at pilot scale.
+containerfill:
+  reminder:
+    poll-interval-ms: 300000
+
 management:
   endpoints:
     web:

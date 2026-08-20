@@ -1,11 +1,14 @@
 package com.shvoy.containerfill.domain;
 
 /**
- * The audited transitions of a {@link ContainerFillOffer}. Only {@code FLAGGED}
- * and {@code CANCELLED} occur in 8.1; the later stories that own the deadline
- * (8.2) and the decision (8.3) append their own event types.
+ * The audited transitions of a {@link ContainerFillOffer}. {@code FLAGGED}/{@code
+ * CANCELLED} are 8.1; {@code DEADLINE_SET}/{@code DEADLINE_REVISED}/{@code
+ * REMINDER_SENT} are 8.2 (the deadline + reminder); the decision (8.3) appends its own.
  */
 public enum ContainerFillOfferAuditEventType {
     FLAGGED,
-    CANCELLED
+    CANCELLED,
+    DEADLINE_SET,
+    DEADLINE_REVISED,
+    REMINDER_SENT
 }

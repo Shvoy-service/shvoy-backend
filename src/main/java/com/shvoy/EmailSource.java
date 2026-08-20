@@ -12,5 +12,6 @@ public enum EmailSource {
     PURCHASE_ORDER,
     APPROVAL_REQUEST,
     DISCREPANCY,
+    CONTAINER_FILL_REMINDER,
     OTHER
 }
