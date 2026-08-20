@@ -75,7 +75,8 @@ public class DiscrepancyCaseService {
         DiscrepancyCase created = caseRepository.save(
             new DiscrepancyCase(payment.getId(), payment.getPurchaseOrderId(), failureDetail));
         audit(created, DiscrepancyCaseAuditEventType.OPENED, failureDetail);
-        notifier.notifyOpened(purchaseOrderService.getSummary(payment.getPurchaseOrderId()).poNumber(), failureDetail);
+        notifier.notifyOpened(purchaseOrderService.getSummary(payment.getPurchaseOrderId()).poNumber(),
+            failureDetail, created.getId());
     }
 
     /** The match passed: auto-resolve the active case — {@code CREDITED} if a credit was logged from it, else {@code CORRECTED}. */

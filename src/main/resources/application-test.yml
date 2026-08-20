@@ -12,3 +12,7 @@ spring:
 shvoy:
   cors:
     allowed-origins: http://localhost:5173,http://localhost:4173
+  # A concrete value so composed email links are assertable in tests; the host
+  # never matters here since no real email leaves CI.
+  frontend:
+    base-url: http://localhost:5173

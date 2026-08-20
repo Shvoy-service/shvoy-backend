@@ -36,6 +36,12 @@ aws:
 shvoy:
   cors:
     allowed-origins: http://localhost:5173,http://localhost:4173
+  # The frontend origin email links point humans at (invite accept, PO /
+  # reconciliation / discrepancy detail). A second thing — beside the CORS
+  # origins above — that breaks silently if environments move, so it lives here
+  # as config, not a constant. Local = the Vite dev server.
+  frontend:
+    base-url: http://localhost:5173
 
 logging:
   level:

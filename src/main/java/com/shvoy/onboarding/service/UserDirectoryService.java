@@ -42,4 +42,21 @@ public class UserDirectoryService {
             .map(User::getEmail)
             .toList();
     }
+
+    /**
+     * The active {@code APPROVER}-role users — who 5.5 notifies on the
+     * single-approver (non-price-increase) path, where any approver can confirm,
+     * as opposed to the price-increase path which notifies the eligible pool
+     * ({@code ApproverPoolService#resolveEligibleApproverEmails}). Tenant-scoped
+     * like every query; addresses only, the same minimal shape as the resolver
+     * query above.
+     */
+    @Transactional(readOnly = true)
+    public List<String> resolveApproverRoleEmails() {
+        return userRepository.findAll().stream()
+            .filter(user -> user.getStatus() == UserStatus.ACTIVE)
+            .filter(user -> user.getRole() == Role.APPROVER)
+            .map(User::getEmail)
+            .toList();
+    }
 }

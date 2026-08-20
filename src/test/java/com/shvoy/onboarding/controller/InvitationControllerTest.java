@@ -87,7 +87,11 @@ class InvitationControllerTest {
                 .andExpect(jsonPath("$.email").value(email))
                 .andExpect(jsonPath("$.role").value("FINANCE"))
                 .andExpect(jsonPath("$.status").value("PENDING"));
-            rawToken = LogCapture.valueAfter(logs.firstMessageContaining("Invite link for " + email), "token=");
+            // The accept link is built from the frontend base URL, and the raw token
+            // appears only inside it (token hygiene).
+            String emailLog = logs.firstMessageContaining("/invite/accept?token=");
+            assertThat(emailLog).contains("http://localhost:5173/invite/accept?token=");
+            rawToken = LogCapture.valueAfter(emailLog, "token=").split("\\s", 2)[0];
         }
 
         var row = jdbcTemplate.queryForMap(

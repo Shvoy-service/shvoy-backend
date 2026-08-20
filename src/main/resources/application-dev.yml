@@ -40,6 +40,12 @@ email:
 shvoy:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS}
+  # No default, same reasoning as the CORS origins above: the Cloudflare Pages
+  # URL isn't known yet. Email links point humans at this host — a wrong or
+  # missing value sends them nowhere — so fail startup until it's set rather
+  # than bake in a guess.
+  frontend:
+    base-url: ${FRONTEND_BASE_URL}
 
 logging:
   level:
