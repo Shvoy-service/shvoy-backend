@@ -37,6 +37,16 @@ public class FrontendLinks {
         return baseUrl + "/invite/accept?token=" + URLEncoder.encode(rawToken, StandardCharsets.UTF_8);
     }
 
+    /**
+     * The set-password screen a self-registration's verification email points at —
+     * confirmed real (not provisional like the routes below): the frontend serves
+     * it at exactly this path as of frontend PR #58. Same token hygiene as
+     * {@link #inviteAccept}.
+     */
+    public String setPassword(String rawToken) {
+        return baseUrl + "/set-password?token=" + URLEncoder.encode(rawToken, StandardCharsets.UTF_8);
+    }
+
     /** The purchase-order detail screen. */
     public String purchaseOrder(UUID purchaseOrderId) {
         return baseUrl + "/purchase-orders/" + purchaseOrderId;

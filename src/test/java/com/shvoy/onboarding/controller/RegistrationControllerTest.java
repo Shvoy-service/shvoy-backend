@@ -17,8 +17,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.shvoy.ConsoleEmailSender;
 import com.shvoy.LogCapture;
-import com.shvoy.onboarding.service.RegistrationService;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -91,14 +91,7 @@ class RegistrationControllerTest {
     @Test
     void activatingWithValidTokenSetsPasswordAndActivates() throws Exception {
         String email = uniqueEmail();
-        String token;
-        try (LogCapture logs = new LogCapture(RegistrationService.class)) {
-            mockMvc.perform(post("/api/onboarding/register")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"email\":\"" + email + "\",\"companyName\":\"Test Co Epsilon\"}"))
-                .andExpect(status().isCreated());
-            token = LogCapture.valueAfter(logs.firstMessageContaining("Verification link for " + email), "token=");
-        }
+        String token = registerAndCaptureTokenFromEmail(email, "Test Co Epsilon");
 
         String storedToken = jdbcTemplate.queryForObject(
             "SELECT verification_token FROM users WHERE email = ?", String.class, email);
@@ -132,19 +125,30 @@ class RegistrationControllerTest {
     @Test
     void weakPasswordOnActivateReturns400() throws Exception {
         String email = uniqueEmail();
-        String token;
-        try (LogCapture logs = new LogCapture(RegistrationService.class)) {
-            mockMvc.perform(post("/api/onboarding/register")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"email\":\"" + email + "\",\"companyName\":\"Test Co Zeta\"}"))
-                .andExpect(status().isCreated());
-            token = LogCapture.valueAfter(logs.firstMessageContaining("Verification link for " + email), "token=");
-        }
+        String token = registerAndCaptureTokenFromEmail(email, "Test Co Zeta");
 
         mockMvc.perform(post("/api/onboarding/activate")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"token\":\"" + token + "\",\"password\":\"short\"}"))
             .andExpect(status().isBadRequest());
+    }
+
+    /**
+     * The token now travels only inside the verification email's set-password
+     * link (sent via the EmailSender seam, ConsoleEmailSender under the test
+     * profile) — same capture pattern as InviteAcceptanceControllerTest's
+     * invite helper, and doubling as the flow's proof that registering
+     * actually sends the email.
+     */
+    private String registerAndCaptureTokenFromEmail(String email, String companyName) throws Exception {
+        try (LogCapture logs = new LogCapture(ConsoleEmailSender.class)) {
+            mockMvc.perform(post("/api/onboarding/register")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"email\":\"" + email + "\",\"companyName\":\"" + companyName + "\"}"))
+                .andExpect(status().isCreated());
+            return LogCapture.valueAfter(logs.firstMessageContaining("/set-password?token="), "token=")
+                .split("\\s", 2)[0];
+        }
     }
 
     private static String uniqueEmail() {

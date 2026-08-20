@@ -15,6 +15,10 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.shvoy.ConflictException;
+import com.shvoy.EmailContent;
+import com.shvoy.EmailMessage;
+import com.shvoy.EmailSender;
+import com.shvoy.EmailSource;
 import com.shvoy.ErrorCode;
 import com.shvoy.IdentityProvider;
 import com.shvoy.NotFoundException;
@@ -38,15 +42,20 @@ public class RegistrationService {
     private final UserRepository userRepository;
     private final JdbcTemplate jdbcTemplate;
     private final IdentityProvider identityProvider;
+    private final EmailSender emailSender;
+    private final RegistrationEmailComposer registrationEmailComposer;
     private final TransactionTemplate transactionTemplate;
 
     RegistrationService(CompanyRepository companyRepository, UserRepository userRepository,
             JdbcTemplate jdbcTemplate, IdentityProvider identityProvider,
+            EmailSender emailSender, RegistrationEmailComposer registrationEmailComposer,
             PlatformTransactionManager transactionManager) {
         this.companyRepository = companyRepository;
         this.userRepository = userRepository;
         this.jdbcTemplate = jdbcTemplate;
         this.identityProvider = identityProvider;
+        this.emailSender = emailSender;
+        this.registrationEmailComposer = registrationEmailComposer;
         // Programmatic transactions rather than @Transactional: a
         // @Transactional method's proxy opens the EntityManager (and so
         // needs a resolvable tenant) before the method body runs — too
@@ -64,9 +73,11 @@ public class RegistrationService {
      */
     public RegisterCompanyResponse register(String email, String companyName) {
         UUID companyId = UUID.randomUUID();
+        String token = SecureTokens.generate();
+        Instant expiresAt = Instant.now().plus(VERIFICATION_TOKEN_TTL);
         TenantContext.set(companyId);
         try {
-            return transactionTemplate.execute(status -> {
+            RegisterCompanyResponse response = transactionTemplate.execute(status -> {
                 // Raw query, same reason as the token lookup below: email
                 // must be unique across ALL companies, and a JpaRepository
                 // query method here (even a native one) would need a
@@ -81,17 +92,26 @@ public class RegistrationService {
                 Company company = companyRepository.save(new Company(companyId, companyName));
 
                 User admin = new User(email, Role.ADMIN);
-                String token = SecureTokens.generate();
-                admin.issueVerificationToken(SecureTokens.hash(token), Instant.now().plus(VERIFICATION_TOKEN_TTL));
+                admin.issueVerificationToken(SecureTokens.hash(token), expiresAt);
                 admin = userRepository.save(admin);
-
-                // Email delivery is a separate (notifications) feature —
-                // logged for now so the flow is testable end to end
-                // without it.
-                log.info("Verification link for {}: /api/onboarding/activate?token={}", email, token);
 
                 return new RegisterCompanyResponse(company.getId(), admin.getId(), true);
             });
+
+            // Sent after the transaction commits, not inside it like
+            // InvitationService's send: the invite flow's company already
+            // exists, but here the send record's company_id FK points at a
+            // row this very transaction is creating, and SendRecordService
+            // writes in REQUIRES_NEW — inside the transaction it couldn't
+            // see the uncommitted company. After also means a rolled-back
+            // registration never emails anyone. Send failure still can't
+            // break the registration (EmailSender never throws), and the
+            // TenantContext this send records under is still set here.
+            EmailContent content = registrationEmailComposer.compose(companyName, token, expiresAt);
+            emailSender.send(new EmailMessage(email, content.subject(), content.body(),
+                EmailSource.REGISTRATION, email));
+
+            return response;
         } finally {
             TenantContext.clear();
         }

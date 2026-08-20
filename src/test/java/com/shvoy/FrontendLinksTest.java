@@ -15,6 +15,7 @@ class FrontendLinksTest {
         FrontendLinks links = new FrontendLinks("http://localhost:5173");
 
         assertThat(links.inviteAccept("tok-123")).isEqualTo("http://localhost:5173/invite/accept?token=tok-123");
+        assertThat(links.setPassword("tok-123")).isEqualTo("http://localhost:5173/set-password?token=tok-123");
         assertThat(links.purchaseOrder(ID)).isEqualTo("http://localhost:5173/purchase-orders/" + ID);
         assertThat(links.reconciliation(ID)).isEqualTo("http://localhost:5173/reconciliation/" + ID);
         assertThat(links.discrepancyCase(ID)).isEqualTo("http://localhost:5173/discrepancies/" + ID);
