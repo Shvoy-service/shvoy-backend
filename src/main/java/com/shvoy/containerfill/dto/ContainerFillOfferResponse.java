@@ -21,6 +21,7 @@ public record ContainerFillOfferResponse(
     BigDecimal spareCbm,
     ContainerFillOfferStatus status,
     Instant deadline,
+    Instant reminderSentAt,
     String notes,
     UUID flaggedBy,
     Instant createdAt,

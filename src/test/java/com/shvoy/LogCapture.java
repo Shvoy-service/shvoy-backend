@@ -33,6 +33,13 @@ public final class LogCapture implements AutoCloseable {
             .orElseThrow(() -> new AssertionError("No log message containing \"" + substring + "\" was captured"));
     }
 
+    public long countMessagesContaining(String substring) {
+        return appender.list.stream()
+            .map(ILoggingEvent::getFormattedMessage)
+            .filter(msg -> msg.contains(substring))
+            .count();
+    }
+
     public static String valueAfter(String message, String key) {
         return message.substring(message.indexOf(key) + key.length());
     }

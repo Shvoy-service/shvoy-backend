@@ -29,18 +29,24 @@ public class UserDirectoryService {
     }
 
     /**
-     * The active users who resolve discrepancy cases — {@code PURCHASING}
-     * ("resolves discrepancies") plus {@code ADMIN}. Tenant-scoped like every
-     * query. The role keeps this a payments-facing method with no {@code Role}
-     * parameter, so {@code payments} never needs the role vocabulary itself.
+     * The active {@code PURCHASING} + {@code ADMIN} users — the operational
+     * audience that both resolves discrepancy cases (6.6) and decides container-fill
+     * offers (8.2), so both notifications address it. Tenant-scoped like every
+     * query; addresses only, so callers never need the {@code Role} vocabulary.
      */
     @Transactional(readOnly = true)
-    public List<String> resolveDiscrepancyResolverEmails() {
+    public List<String> resolvePurchasingAndAdminEmails() {
         return userRepository.findAll().stream()
             .filter(user -> user.getStatus() == UserStatus.ACTIVE)
             .filter(user -> user.getRole() == Role.PURCHASING || user.getRole() == Role.ADMIN)
             .map(User::getEmail)
             .toList();
+    }
+
+    /** Discrepancy-resolver recipients (6.6) — the same active PURCHASING+ADMIN set, named for its first caller. */
+    @Transactional(readOnly = true)
+    public List<String> resolveDiscrepancyResolverEmails() {
+        return resolvePurchasingAndAdminEmails();
     }
 
     /**

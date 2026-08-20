@@ -53,6 +53,9 @@ public class ContainerFillOffer extends TenantScoped {
     @Column(name = "deadline")
     private Instant deadline;
 
+    @Column(name = "reminder_sent_at")
+    private Instant reminderSentAt;
+
     @Column(name = "notes", length = 2000)
     private String notes;
 
@@ -81,6 +84,27 @@ public class ContainerFillOffer extends TenantScoped {
     /** Withdraw an undecided offer — the correction path (relog a fresh offer rather than editing this one). */
     public void cancel() {
         this.status = ContainerFillOfferStatus.CANCELLED;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Set the first decision deadline (Story 8.2): OPEN → AWAITING_DECISION; arms the reminder. */
+    public void setDeadline(Instant deadline) {
+        this.deadline = deadline;
+        this.status = ContainerFillOfferStatus.AWAITING_DECISION;
+        this.reminderSentAt = null;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Renegotiate the deadline while AWAITING_DECISION — clears the reminder stamp so it re-arms. */
+    public void reviseDeadline(Instant deadline) {
+        this.deadline = deadline;
+        this.reminderSentAt = null;
+        this.updatedAt = Instant.now();
+    }
+
+    /** Stamp that the approaching-deadline reminder has been sent — the poll's idempotence record (Story 8.2). */
+    public void markReminderSent() {
+        this.reminderSentAt = Instant.now();
         this.updatedAt = Instant.now();
     }
 
@@ -116,6 +140,10 @@ public class ContainerFillOffer extends TenantScoped {
 
     public Instant getDeadline() {
         return deadline;
+    }
+
+    public Instant getReminderSentAt() {
+        return reminderSentAt;
     }
 
     public String getNotes() {

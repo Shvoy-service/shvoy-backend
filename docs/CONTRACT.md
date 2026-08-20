@@ -1115,7 +1115,7 @@ The two MVP conditions (each read-time, actionable, already-known):
 
 ## Dates and timestamps
 
-**Owner:** Cleanup Story 5 (date field mapping & container-fill deadline timezone). Field-level mapping is now **settled** — Story 3.4 gave the rule its first concrete case (SKU price validity dates), so this is no longer a rule with nothing to point at. Only the container-fill deadline timezone remains open, parked until Feature 8.
+**Owner:** Cleanup Story 5 (date field mapping & container-fill deadline timezone). Field-level mapping is now **settled** — Story 3.4 gave the rule its first concrete case (SKU price validity dates). The container-fill deadline timezone, the last open item, is now **settled** too (Story 8.2 — see below).
 
 Rule: business dates are `LocalDate` (serialises as `yyyy-MM-dd`), real points in time are `Instant` (serialises as ISO-8601 UTC).
 
@@ -1129,9 +1129,14 @@ Rule: business dates are `LocalDate` (serialises as `yyyy-MM-dd`), real points i
 | Arrival date (the `ARRIVAL` anchor) | `LocalDate` | Model in place — Story 7.1, `ShipmentConsignment#arrivalDate` (publish is 7.6) |
 | Payment anchor date (the real date an order's BL/invoice/arrival occurred, as opposed to `PaymentTerms.anchorEvent`, which only names *which kind* of event) | `LocalDate` | Live for INVOICE (6.4) + BL/EX_FACTORY (7.2); ARRIVAL lands in 7.6 |
 | All `created_at`/`updated_at` timestamps | `Instant` (UTC) | Implemented throughout |
-| Container-fill decision deadline | `Instant` (UTC) — **timezone for display/evaluation not yet decided**, see below | Not yet implemented (Feature 8) |
+| Container-fill decision deadline | `Instant` (UTC), **entered & displayed in Europe/London** (DST-aware) | Implemented — Story 8.2, `ContainerFillOffer#deadline` |
 
-**Open decision:** the container-fill decision deadline is a genuine point-in-time, but which timezone it's *presented and evaluated* in (supplier's, company's, or UTC) isn't decided yet — the "confirmed by deadline" branch depends on this. **TBD**, to be resolved and recorded here before container-fill logic depends on it.
+**Settled (Story 8.2): container-fill deadline timezone = Europe/London, DST-aware.**
+
+- **Storage & evaluation:** the deadline is a genuine point-in-time — stored as an `Instant` (UTC), and every comparison (future-check on entry, the reminder threshold, 8.3's lapse check) is instant-vs-instant. No wall-clock maths.
+- **Entry (the wire):** the API accepts the **`Instant` itself** (ISO-8601 UTC, e.g. `2026-10-25T17:00:00Z`) on `PUT /api/container-fill-offers/{id}/deadline`. The **frontend** owns the London→UTC conversion (the entry UX is London-labelled) before sending — so the backend never parses an ambiguous local time. One conversion, one place.
+- **Display:** render the stored `Instant` in `Europe/London` **explicitly** (with the zone label) — never browser-local. The reminder email does this server-side (emails have no browser); list/single responses return the raw `Instant` and the frontend renders it in `Europe/London`.
+- **Zone rules, never a fixed offset** — BST (+01:00) and GMT (+00:00) must both resolve correctly across the clocks-change weekends. **Worked DST example:** a `17:00` London deadline on **2026-10-25** (the clocks-back Sunday — 17:00 is already GMT that day) is the instant `2026-10-25T17:00:00Z`; a `17:00` London deadline on **2026-07-01** (summer, BST +01:00) is `2026-07-01T16:00:00Z`. Both render back as `17:00 (Europe/London)`.
 
 ---
 

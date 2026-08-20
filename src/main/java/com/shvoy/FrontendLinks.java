@@ -51,4 +51,9 @@ public class FrontendLinks {
     public String discrepancyCase(UUID caseId) {
         return baseUrl + "/discrepancies/" + caseId;
     }
+
+    /** The container-fill offer detail screen (where a spare-capacity decision is made). */
+    public String containerFillOffer(UUID offerId) {
+        return baseUrl + "/container-fill-offers/" + offerId;
+    }
 }

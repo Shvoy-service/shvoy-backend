@@ -11,6 +11,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -19,6 +20,7 @@ import com.shvoy.containerfill.dto.CancelContainerFillOfferRequest;
 import com.shvoy.containerfill.dto.ContainerFillOfferResponse;
 import com.shvoy.containerfill.dto.ContainerFillOfferSummary;
 import com.shvoy.containerfill.dto.FlagContainerFillOfferRequest;
+import com.shvoy.containerfill.dto.SetContainerFillDeadlineRequest;
 import com.shvoy.containerfill.service.ContainerFillOfferService;
 import com.shvoy.containerfill.service.ContainerFillOfferViewService;
 
@@ -55,6 +57,14 @@ class ContainerFillOfferController {
 
     @GetMapping("/api/container-fill-offers/{offerId}")
     ContainerFillOfferResponse get(@PathVariable UUID offerId) {
+        return viewService.getView(offerId);
+    }
+
+    @PutMapping("/api/container-fill-offers/{offerId}/deadline")
+    @PreAuthorize("hasAnyRole('ADMIN', 'PURCHASING')")
+    ContainerFillOfferResponse setDeadline(
+            @PathVariable UUID offerId, @Valid @RequestBody SetContainerFillDeadlineRequest request) {
+        offerService.setDeadline(offerId, request);
         return viewService.getView(offerId);
     }
 
