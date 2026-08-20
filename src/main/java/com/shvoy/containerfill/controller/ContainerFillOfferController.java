@@ -17,9 +17,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.shvoy.containerfill.dto.CancelContainerFillOfferRequest;
+import com.shvoy.containerfill.dto.ConfirmContainerFillOfferRequest;
 import com.shvoy.containerfill.dto.ContainerFillOfferResponse;
 import com.shvoy.containerfill.dto.ContainerFillOfferSummary;
+import com.shvoy.containerfill.dto.DeclineContainerFillOfferRequest;
 import com.shvoy.containerfill.dto.FlagContainerFillOfferRequest;
+import com.shvoy.containerfill.dto.LinkFillPurchaseOrderRequest;
 import com.shvoy.containerfill.dto.SetContainerFillDeadlineRequest;
 import com.shvoy.containerfill.service.ContainerFillOfferService;
 import com.shvoy.containerfill.service.ContainerFillOfferViewService;
@@ -73,6 +76,30 @@ class ContainerFillOfferController {
     ContainerFillOfferResponse cancel(
             @PathVariable UUID offerId, @Valid @RequestBody CancelContainerFillOfferRequest request) {
         offerService.cancel(offerId, request);
+        return viewService.getView(offerId);
+    }
+
+    @PostMapping("/api/container-fill-offers/{offerId}/confirm")
+    @PreAuthorize("hasAnyRole('ADMIN', 'PURCHASING')")
+    ContainerFillOfferResponse confirm(
+            @PathVariable UUID offerId, @Valid @RequestBody ConfirmContainerFillOfferRequest request) {
+        offerService.confirm(offerId, request);
+        return viewService.getView(offerId);
+    }
+
+    @PostMapping("/api/container-fill-offers/{offerId}/decline")
+    @PreAuthorize("hasAnyRole('ADMIN', 'PURCHASING')")
+    ContainerFillOfferResponse decline(
+            @PathVariable UUID offerId, @Valid @RequestBody DeclineContainerFillOfferRequest request) {
+        offerService.decline(offerId, request);
+        return viewService.getView(offerId);
+    }
+
+    @PutMapping("/api/container-fill-offers/{offerId}/fill-po")
+    @PreAuthorize("hasAnyRole('ADMIN', 'PURCHASING')")
+    ContainerFillOfferResponse linkFillPurchaseOrder(
+            @PathVariable UUID offerId, @Valid @RequestBody LinkFillPurchaseOrderRequest request) {
+        offerService.linkFillPurchaseOrder(offerId, request);
         return viewService.getView(offerId);
     }
 }
