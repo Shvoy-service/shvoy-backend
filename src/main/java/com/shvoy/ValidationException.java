@@ -14,4 +14,14 @@ public class ValidationException extends ApiException {
     public ValidationException(String message) {
         super(ErrorCode.VALIDATION_ERROR, message);
     }
+
+    /**
+     * For 400s that deserve their own code in the catalogue — currently
+     * only INVALID_PASSWORD (CognitoIdentityProvider), which the frontend
+     * maps to actionable "fix your password" copy rather than the generic
+     * check-your-input fallback VALIDATION_ERROR gets.
+     */
+    public ValidationException(ErrorCode code, String message) {
+        super(code, message);
+    }
 }

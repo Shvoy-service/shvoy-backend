@@ -148,6 +148,7 @@ Every error response across the API — validation, not-found, conflict, forbidd
 | `INVALID_INVITE` | 404 | Registration/invite token is unknown, expired, or already used — kept deliberately generic; doesn't distinguish which, to avoid leaking token state to an unauthenticated caller |
 | `NOT_FOUND` | 404 | Resource doesn't exist, or exists in a different company (cross-tenant access returns the same `NOT_FOUND` as a genuine absence — see Multi-tenancy below — never a distinct code) |
 | `VALIDATION_ERROR` | 400 | Request body failed `@Valid` constraints, wasn't parseable JSON, or failed a hand-checked rule raised via `ValidationException` (cross-field checks Bean Validation can't express, or a price file's row-level errors collapsed into one message — see SKU & price entry/upload below) |
+| `INVALID_PASSWORD` | 400 | The chosen password was rejected by Cognito's password policy (activate/invite-accept). `message` carries Cognito's own reason, naming the broken rule — informational as always; the frontend maps its copy from the code |
 | `FORBIDDEN` | 403 | Authenticated, but the caller's role doesn't permit this action |
 | `UNAUTHENTICATED` | 401 | No valid Cognito token, or the token's identity has no active SHVOY profile |
 

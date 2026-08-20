@@ -64,6 +64,7 @@ public enum ErrorCode {
     INVALID_INVITE(HttpStatus.NOT_FOUND),
     NOT_FOUND(HttpStatus.NOT_FOUND),
     VALIDATION_ERROR(HttpStatus.BAD_REQUEST),
+    INVALID_PASSWORD(HttpStatus.BAD_REQUEST),
     FORBIDDEN(HttpStatus.FORBIDDEN),
     UNAUTHENTICATED(HttpStatus.UNAUTHORIZED);
 
